@@ -1,5 +1,5 @@
 GOOD_WARN = -std=c++14
-CUDA_DIR = /usr/local/cuda/
+CUDA_DIR ?= $(CUDA_HOME)
 NVCC = nvcc
 CXX = g++
 
@@ -10,7 +10,7 @@ CC_VOLTA=-gencode arch=compute_70,code=sm_70
 
 # IMPORTANT!
 # The following should be adjusted to the target GPU architecture:
-COMPUTE_CAPABILITY=$(CC_MAXWELL)
+COMPUTE_CAPABILITY=$(CC_VOLTA)
 
 mode = release
 
@@ -47,7 +47,7 @@ all: $(TARGET)
 
 $(TARGET): $(OUT_OBJS) $(OUT_CUDA_OBJS)
 	$(NVCC) $(NVCCFLAGS) $(OUT_CUDA_OBJS) -dlink -o $(BUILDDIR)/link.o
-	$(CXX) $(CXXFLAGS) $(Ommas -DNDEBUGUT_OBJS) $(OUT_OBJS) $(OUT_CUDA_OBJS) $(BUILDDIR)/link.o $(LDFLAGS) -o $(TARGET)
+	$(CXX) $(CXXFLAGS) $(OUT_OBJS) $(OUT_CUDA_OBJS) $(BUILDDIR)/link.o $(LDFLAGS) -o $(TARGET)
 
 $(BUILDDIR)/%.o: $(SRCDIR)/%.cc $(SRCDIR)/tsp.h
 	@mkdir -p $(BUILDDIR)

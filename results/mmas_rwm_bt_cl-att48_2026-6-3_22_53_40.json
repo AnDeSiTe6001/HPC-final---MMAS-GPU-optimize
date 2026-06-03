@@ -1,0 +1,116 @@
+{
+  "algorithm": "mmas_rwm_bt_cl",
+  "arguments": {
+    "--alg": "mmas_rwm_bt_cl",
+    "--ants": "100",
+    "--block-warps": "1",
+    "--cand-list-size": "32",
+    "--help": false,
+    "--instance": "ALL_tsp/att48.tsp",
+    "--iter": "1000",
+    "--ls": "1",
+    "--ls-block-warps": "0",
+    "--results-dir": "results",
+    "--rho": "0.9",
+    "--seed": "0",
+    "--trials": "1",
+    "--version": false
+  },
+  "experiment-finished-at": "2026-6-3 22:53:40",
+  "experiment-started-at": "2026-6-3 22:53:40",
+  "instance": {
+    "dimension": 48,
+    "is-symmetric": true,
+    "name": "att48"
+  },
+  "iterations-count": 1000,
+  "ls-block-warps": 1,
+  "mmas-parameters": {
+    "ants": 100,
+    "beta": 2.0,
+    "cand-list-size": 32,
+    "p-best": 0.01,
+    "rho": 0.8999999761581421,
+    "use-cand-lists": true
+  },
+  "rng-seed": 1277672329,
+  "trials": [
+    {
+      "best-solution-error": 0.0,
+      "best-solutions-log": [
+        [
+          10653.0,
+          0
+        ],
+        [
+          10628.0,
+          2
+        ]
+      ],
+      "final-solution-cost": 10628,
+      "final-solution-route": [
+        17,
+        6,
+        27,
+        5,
+        36,
+        18,
+        26,
+        16,
+        42,
+        29,
+        35,
+        45,
+        32,
+        19,
+        46,
+        20,
+        31,
+        38,
+        47,
+        4,
+        41,
+        23,
+        9,
+        44,
+        34,
+        3,
+        25,
+        1,
+        28,
+        33,
+        40,
+        15,
+        21,
+        2,
+        22,
+        13,
+        24,
+        12,
+        10,
+        11,
+        14,
+        39,
+        8,
+        0,
+        7,
+        37,
+        30,
+        43
+      ],
+      "initialization-time": 0.121944281,
+      "kernel-mean-times": {
+        "best-solution-update": 8.297739e-06,
+        "cand-list-product-cache-update": 5.2184520000000005e-06,
+        "local-search": 0.00010142263300000001,
+        "pheromone-deposit": 5.376263e-06,
+        "pheromone-evaporate": 4.9802970000000005e-06,
+        "product-cache-update": 5.032930000000001e-06,
+        "solution-build": 4.219286100000001e-05
+      },
+      "mean-iteration-time": 0.00017252117686439306,
+      "total-time": 0.240407896
+    }
+  ],
+  "trials-count": 1
+}

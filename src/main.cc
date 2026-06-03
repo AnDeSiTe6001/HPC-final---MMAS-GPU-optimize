@@ -4,7 +4,7 @@
 #include "docopt.h"
 #include "mmas.h"
 #include "utils.h"
-
+#include <iostream>
 
 static const char USAGE[] =
 R"(GPU-based MMAS.
@@ -51,16 +51,30 @@ R"(GPU-based MMAS.
 int main(int argc, char *argv[]) {
     using namespace std;
 
-    auto args = docopt::docopt(
-        USAGE,
-        { argv + 1, argv + argc },
-        true,  // show help if requested
-        "GPU-based MMAS 1.0 by Rafal Skinderowicz");
+    cerr << "[DBG] main() start" <<'\n';
 
+    try {
+        auto args = docopt::docopt(
+            USAGE,
+            { argv + 1, argv + argc },
+            true,  // show help if requested
+            "GPU-based MMAS 1.0 by Rafal Skinderowicz");
 
-    load_best_known_solutions("best-known.json");
+        cerr << "[DBG] args parsed" <<'\n';
 
-    run_mmas_experiment(args);
+        load_best_known_solutions("best-known.json");
+        cerr << "[DBG] best-known loaded" <<'\n';
+
+        run_mmas_experiment(args);
+        cerr << "[DBG] experiment done" <<'\n';
+
+    } catch (const std::exception &e) {
+        cerr << "[FATAL] Unhandled exception: " << e.what() <<'\n';
+        return 1;
+    } catch (...) {
+        cerr << "[FATAL] Unknown exception caught" <<'\n';
+        return 1;
+    }
 
     return EXIT_SUCCESS;
 }

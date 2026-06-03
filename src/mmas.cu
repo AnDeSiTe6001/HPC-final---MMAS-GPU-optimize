@@ -2270,6 +2270,8 @@ json run_gpu_based_mmas(ProblemInstance &instance,
 
     using namespace std;
 
+    cerr << "[DBG] run_gpu_based_mmas() start, dim=" << instance.dimension_ << endl;
+
     Timer initialization_timer;
 
     const auto dimension = instance.dimension_;
@@ -2277,8 +2279,10 @@ json run_gpu_based_mmas(ProblemInstance &instance,
     uniform_int_distribution<int32_t> distribution(0, instance.dimension_ - 1);
     uniform_real_distribution<> float_distribution(0.0, 1.0);
     const auto nn_sol_start_node = distribution(rng);
+    cerr << "[DBG] calling calc_initial_trail_limits" << endl;
     const auto trail_limits = calc_initial_trail_limits(instance, params,
                                                         nn_sol_start_node);
+    cerr << "[DBG] trail_limits done, starting cudaMalloc" << endl;
     device_vector<TrailLimits> d_trail_limits(1, trail_limits);
 
     device_vector<float> d_pheromone(dimension * dimension, trail_limits.max_);
@@ -2726,14 +2730,18 @@ bool make_path(const std::string& path) {
 void run_mmas_experiment(std::map<std::string, docopt::value> &args) {
     using namespace std;
 
+    cerr << "[DBG] run_mmas_experiment() start" << endl;
+
     json experiment_log;
 
     experiment_log["experiment-started-at"] = get_current_datetime_string();
     experiment_log["arguments"] = cmdline_args_to_json(args);
 
     const auto path = args["--instance"].asString();
+    cerr << "[DBG] loading instance: " << path << endl;
 
     auto instance = load_tsplib_instance(path.c_str());
+    cerr << "[DBG] instance loaded, dim=" << instance.dimension_ << endl;
 
     const auto dimension = instance.dimension_;
     const auto ants_count = args["--ants"].asLong() ? args["--ants"].asLong()
