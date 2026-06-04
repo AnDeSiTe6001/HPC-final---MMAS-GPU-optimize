@@ -674,28 +674,115 @@ TrailLimits calc_trail_limits(uint32_t instance_dimension,
 
 
 /**
-Gathers problem instance-related data to lower number of parameters 
+Computes the TSPLIB distance between two nodes directly from their coordinates,
+mirroring the host implementations in tsp.cc bit-for-bit (same double-precision
+math, same rounding). Used by the on-the-fly path that avoids storing the full
+n*n distance/heuristic matrices on the GPU for coordinate-based instances.
+EXPLICIT instances have no coordinates and never reach here.
+*/
+__device__ inline
+float device_node_distance(EdgeWeightType type,
+                           const double *coords,
+                           uint32_t from,
+                           uint32_t to) {
+    const double x1 = coords[2 * from];
+    const double y1 = coords[2 * from + 1];
+    const double x2 = coords[2 * to];
+    const double y2 = coords[2 * to + 1];
+
+    switch (type) {
+        case EUC_2D: {
+            const double dx = x2 - x1;
+            const double dy = y2 - y1;
+            return static_cast<float>(
+                static_cast<int32_t>(sqrt(dx * dx + dy * dy) + 0.5));
+        }
+        case CEIL_2D: {
+            const double dx = x2 - x1;
+            const double dy = y2 - y1;
+            return static_cast<float>(
+                static_cast<int32_t>(ceil(sqrt(dx * dx + dy * dy))));
+        }
+        case ATT: {
+            const double xd = x1 - x2;
+            const double yd = y1 - y2;
+            const double rij = sqrt((xd * xd + yd * yd) / 10.0);
+            const int32_t tij = static_cast<int32_t>(rij);
+            return static_cast<float>(tij < rij ? tij + 1 : tij);
+        }
+        case GEO: {
+            const double kPi = 3.141592653589793238462643;
+            double deg, mn;
+            deg = static_cast<int32_t>(x1); mn = x1 - deg;
+            const double lati = kPi * (deg + 5.0 * mn / 3.0) / 180.0;
+            deg = static_cast<int32_t>(x2); mn = x2 - deg;
+            const double latj = kPi * (deg + 5.0 * mn / 3.0) / 180.0;
+            deg = static_cast<int32_t>(y1); mn = y1 - deg;
+            const double longi = kPi * (deg + 5.0 * mn / 3.0) / 180.0;
+            deg = static_cast<int32_t>(y2); mn = y2 - deg;
+            const double longj = kPi * (deg + 5.0 * mn / 3.0) / 180.0;
+            const double q1 = cos(longi - longj);
+            const double q2 = cos(lati - latj);
+            const double q3 = cos(lati + latj);
+            return static_cast<float>(static_cast<int32_t>(
+                6378.388 * acos(0.5 * ((1.0 + q1) * q2 - (1.0 - q1) * q3)) + 1.0));
+        }
+        default:
+            return 0.0f;  // EXPLICIT: must use distance_matrix_ instead
+    }
+}
+
+
+/**
+Gathers problem instance-related data to lower number of parameters
 passed to kernels.
 
 Warning: All pointers should point to device-allocated memory.
 */
 struct InstanceContext {
     uint32_t dimension_ = 0;
-    float* coordinates_ = nullptr;  // Location (x, y) of each node / city of the TSP
+    // Coordinates (x, y) of each node, stored as double to match the host
+    // distance computations exactly. May be empty for EXPLICIT instances.
+    double* coordinates_ = nullptr;
+    // Full n*n matrices. When null (coordinate-based instances) distances and
+    // heuristic values are recomputed on the fly from coordinates_ to save
+    // O(n^2) GPU memory; see get_distance / get_heuristic.
     float* distance_matrix_ = nullptr;
     float* heuristic_matrix_ = nullptr;
     float heuristic_weight_ = 2;  // importance of the heuristic information
     uint32_t cand_list_size_ = 0;
     uint32_t* cand_lists_ = nullptr;
+    EdgeWeightType edge_weight_type_ = EUC_2D;
 
-    __device__ 
+    __device__
     float get_distance(uint32_t from,
                        uint32_t to) const {
 
         assert(from < dimension_ && to < dimension_);
-        assert(distance_matrix_ != nullptr);
 
-        return distance_matrix_[from * dimension_ + to];
+        if (distance_matrix_ != nullptr) {
+            return distance_matrix_[from * dimension_ + to];
+        }
+        return device_node_distance(edge_weight_type_, coordinates_, from, to);
+    }
+
+    /**
+    Heuristic value 1 / dist(from, to)^beta, matching create_heuristic_matrix.
+    Reads the precomputed matrix when present, otherwise recomputes on the fly.
+    */
+    __device__
+    float get_heuristic(uint32_t from,
+                        uint32_t to) const {
+
+        assert(from < dimension_ && to < dimension_);
+
+        if (heuristic_matrix_ != nullptr) {
+            return heuristic_matrix_[from * dimension_ + to];
+        }
+        const double dist = get_distance(from, to);
+        return dist > 0
+             ? static_cast<float>(1.0 / pow(dist, static_cast<double>(heuristic_weight_)))
+             : 1.0f;
     }
 };
 
@@ -751,7 +838,6 @@ void update_cand_lists_pheromone_heuristic_product_cache(
     const auto cand_list_size = instance.cand_list_size_;
 
     const auto offset = src_node * instance.dimension_;
-    auto *heuristic = instance.heuristic_matrix_ + offset;
     auto *pheromone = ctx.pheromone_matrix_ + offset;
 
     const auto cand_list_offset = src_node * cand_list_size;
@@ -760,7 +846,7 @@ void update_cand_lists_pheromone_heuristic_product_cache(
 
     for (uint32_t i = threadIdx.x; i < cand_list_size; i += blockDim.x) {
         const auto node = cand_list[i];
-        const auto product = heuristic[node] * pheromone[node];
+        const auto product = instance.get_heuristic(src_node, node) * pheromone[node];
         product_cache[i] = (calc_reciprocal && product > 0)
                          ? 1.0f / product
                          : product;
@@ -783,7 +869,6 @@ void update_pheromone_heuristic_product_cache(
 
     const auto node = blockIdx.x;
     const auto offset = node * instance.dimension_;
-    const auto *heuristic = instance.heuristic_matrix_ + offset;
     const auto *pheromone = ctx.pheromone_matrix_ + offset;
     auto *product_cache = ctx.product_cache_ + offset;
 
@@ -791,7 +876,7 @@ void update_pheromone_heuristic_product_cache(
          endpoint < instance.dimension_;
          endpoint += blockDim.x) {
 
-        const auto product = heuristic[endpoint] * pheromone[endpoint];
+        const auto product = instance.get_heuristic(node, endpoint) * pheromone[endpoint];
         const auto result = (calc_reciprocal && product > 0)
                           ? (1 / product)
                           : product;
@@ -1351,15 +1436,14 @@ void build_ant_solution_using_cand_lists(
         if (cand_node == dimension) {  // All nearest neighbors were visited?
             // Choose among all the unvisited nodes the one with the maximum
             // product
-            auto * const heuristic = instance.heuristic_matrix_ + current_node * dimension;
-            auto * const pheromone = ctx.pheromone_matrix_ + current_node * dimension; 
+            auto * const pheromone = ctx.pheromone_matrix_ + current_node * dimension;
             const auto length = tabu.get_length();
             float cand_product = -1;
 
             for (uint32_t i = threadIdx.x; i < length; i += blockDim.x) {
                 const auto node = tabu.get_candidate(i);
                 if (tabu.is_candidate_unvisited(node)) {
-                    const float product = pheromone[node] * heuristic[node];
+                    const float product = pheromone[node] * instance.get_heuristic(current_node, node);
                     cand_product = max(cand_product, product);
                     cand_node = cand_product == product ? node : cand_node;
                 }
@@ -1375,7 +1459,7 @@ void build_ant_solution_using_cand_lists(
     for (uint32_t i = threadIdx.x; i < dimension; i += blockDim.x) {
         const auto node = ant_route[i];
         const auto next_node = ant_route[(i + 1) % dimension];
-        my_sum += instance.distance_matrix_[node * dimension + next_node];
+        my_sum += instance.get_distance(node, next_node);
     }
     // Now perform warp level reduce
     my_sum = block_sum(my_sum, shared_mem_buffer);
@@ -1694,7 +1778,7 @@ void build_ant_solution(
     for (uint32_t i = threadIdx.x; i < dimension; i += blockDim.x) {
         const auto node = ant_route[i];
         const auto next_node = ant_route[(i + 1) % dimension];
-        my_sum += instance.distance_matrix_[node * dimension + next_node];
+        my_sum += instance.get_distance(node, next_node);
     }
     // Now perform warp level reduce
     my_sum = block_sum(my_sum, shared_mem_buffer);
@@ -2286,11 +2370,26 @@ json run_gpu_based_mmas(ProblemInstance &instance,
     device_vector<TrailLimits> d_trail_limits(1, trail_limits);
 
     device_vector<float> d_pheromone(dimension * dimension, trail_limits.max_);
-    device_vector<float> d_heuristic(create_heuristic_matrix(instance, params));
 
-    // Convert vector of doubles to vector of floats
-    vector<float> dist_matrix(dimension * dimension);
-    {
+    // For coordinate-based instances we recompute distance and heuristic values
+    // on the GPU from the node coordinates (see InstanceContext::get_distance /
+    // get_heuristic) instead of storing two full n*n float matrices. This saves
+    // 2 * n*n * 4 bytes (2 * 27.5 GiB for pla85900) and is the main enabler for
+    // large instances. EXPLICIT instances have no coordinates, so they must keep
+    // the matrices (the distance matrix is their source data).
+    const bool compute_dist_on_the_fly =
+        (instance.edge_weight_type_ != EXPLICIT) && !instance.coordinates_.empty();
+
+    // create_heuristic_matrix() is only evaluated (and only allocates its n*n
+    // host vector) when we actually need the matrix.
+    device_vector<float> d_heuristic(
+        compute_dist_on_the_fly ? vector<float>()
+                                : create_heuristic_matrix(instance, params));
+
+    // Convert vector of doubles to vector of floats (empty when on the fly)
+    vector<float> dist_matrix;
+    if (!compute_dist_on_the_fly) {
+        dist_matrix.resize(dimension * dimension);
         auto it = dist_matrix.begin();
         for (const double d : instance.distance_matrix_) {
             *it++ = static_cast<float>(d);
@@ -2298,7 +2397,9 @@ json run_gpu_based_mmas(ProblemInstance &instance,
     }
     device_vector<float> d_dist_matrix(dist_matrix);
 
-    vector<float> coordinates;
+    // Coordinates are kept as double on the device so the on-the-fly distance
+    // computation matches the host (tsp.cc) bit-for-bit.
+    vector<double> coordinates;
     if (!instance.coordinates_.empty()) {
         coordinates.reserve(2 * dimension);
         for (auto p : instance.coordinates_) {
@@ -2306,7 +2407,7 @@ json run_gpu_based_mmas(ProblemInstance &instance,
             coordinates.push_back(p.second);
         }
     }
-    device_vector<float> d_coordinates(coordinates);
+    device_vector<double> d_coordinates(coordinates);
 
     device_vector<float> d_cand_lists_product_cache(dimension * params.cand_list_size_);
 
@@ -2359,11 +2460,12 @@ json run_gpu_based_mmas(ProblemInstance &instance,
     InstanceContext instance_ctx {
         dimension,
         d_coordinates,
-        d_dist_matrix,
-        d_heuristic,
+        compute_dist_on_the_fly ? nullptr : d_dist_matrix.data(),
+        compute_dist_on_the_fly ? nullptr : d_heuristic.data(),
         static_cast<float>(params.beta_),
         params.cand_list_size_,
-        d_cand_lists
+        d_cand_lists,
+        instance.edge_weight_type_
     };
 
     MMASRunContext mmas_ctx {
@@ -3049,7 +3151,15 @@ void run_mmas_experiment(std::map<std::string, docopt::value> &args) {
         abort();
     }
 
-    instance.init_distance_matrix();
+    // Only EXPLICIT instances need a materialized host distance matrix (it is
+    // their source data; init_distance_matrix() is a no-op there anyway as it is
+    // loaded from file). For coordinate-based instances we skip it so the host
+    // never builds an O(n^2) matrix (55 GiB of doubles for pla85900) — distances
+    // are recomputed on demand (host get_distance falls back to
+    // calculate_distance, the GPU recomputes from coordinates).
+    if (instance.edge_weight_type_ == EXPLICIT) {
+        instance.init_distance_matrix();
+    }
     instance.init_nn_lists(params.cand_list_size_);
 
     if (alg.use_cand_lists_) {
