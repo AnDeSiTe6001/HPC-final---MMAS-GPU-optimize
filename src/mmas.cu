@@ -2345,7 +2345,13 @@ json run_gpu_based_mmas(ProblemInstance &instance,
     device_vector<uint32_t> d_global_best_route(dimension);
     device_vector<uint32_t> d_reset_best_route(dimension);
 
-    device_vector<float> d_product_cache(dimension * dimension);
+    // The full n*n product cache is only read by the non-candidate-list build
+    // kernel (build_ant_solution, via ctx.product_cache_). The _cl variants use
+    // d_cand_lists_product_cache (n*cand_list_size) instead and never read this
+    // matrix, so allocating it for them just wastes n*n*4 bytes (27.5 GiB for
+    // pla85900) and is a primary OOM cause. Allocate it only when needed.
+    device_vector<float> d_product_cache(
+        alg.use_cand_lists_ ? 0 : dimension * dimension);
     device_vector<pair<float, uint32_t>> d_global_best_log(
         MMASRunContext::global_best_log_capacity);
     device_vector<uint32_t> d_global_best_log_length(1, 0);
@@ -2415,10 +2421,14 @@ json run_gpu_based_mmas(ProblemInstance &instance,
          << max_active_num_blocks << endl;
 
     for (uint32_t iter = 0; iter < iterations; ++iter) {
-        product_cache_update_timer.start();
-        update_pheromone_heuristic_product_cache<<<dimension, 128>>>
-            (instance_ctx, mmas_ctx, alg.use_product_reciprocal_);
-        product_cache_update_timer.accumulate_elapsed();
+        // The full n*n product cache feeds only the non-_cl build kernel, so
+        // skip updating it for _cl variants (it isn't allocated for them).
+        if (!alg.use_cand_lists_) {
+            product_cache_update_timer.start();
+            update_pheromone_heuristic_product_cache<<<dimension, 128>>>
+                (instance_ctx, mmas_ctx, alg.use_product_reciprocal_);
+            product_cache_update_timer.accumulate_elapsed();
+        }
 
         if (alg.use_cand_lists_) {
             cand_list_product_cache_update_timer.start();
