@@ -761,7 +761,7 @@ struct InstanceContext {
         assert(from < dimension_ && to < dimension_);
 
         if (distance_matrix_ != nullptr) {
-            return distance_matrix_[from * dimension_ + to];
+            return distance_matrix_[static_cast<size_t>(from) * dimension_ + to];
         }
         return device_node_distance(edge_weight_type_, coordinates_, from, to);
     }
@@ -777,7 +777,7 @@ struct InstanceContext {
         assert(from < dimension_ && to < dimension_);
 
         if (heuristic_matrix_ != nullptr) {
-            return heuristic_matrix_[from * dimension_ + to];
+            return heuristic_matrix_[static_cast<size_t>(from) * dimension_ + to];
         }
         const double dist = get_distance(from, to);
         return dist > 0
@@ -837,10 +837,10 @@ void update_cand_lists_pheromone_heuristic_product_cache(
     const auto src_node = blockIdx.x;
     const auto cand_list_size = instance.cand_list_size_;
 
-    const auto offset = src_node * instance.dimension_;
+    const auto offset = static_cast<size_t>(src_node) * instance.dimension_;
     auto *pheromone = ctx.pheromone_matrix_ + offset;
 
-    const auto cand_list_offset = src_node * cand_list_size;
+    const auto cand_list_offset = static_cast<size_t>(src_node) * cand_list_size;
     auto *cand_list = instance.cand_lists_ + cand_list_offset;
     auto *product_cache = ctx.cand_lists_product_cache_ + cand_list_offset;
 
@@ -868,7 +868,7 @@ void update_pheromone_heuristic_product_cache(
     assert(instance.dimension_ == get_block_count());
 
     const auto node = blockIdx.x;
-    const auto offset = node * instance.dimension_;
+    const auto offset = static_cast<size_t>(node) * instance.dimension_;
     const auto *pheromone = ctx.pheromone_matrix_ + offset;
     auto *product_cache = ctx.product_cache_ + offset;
 
@@ -1436,7 +1436,7 @@ void build_ant_solution_using_cand_lists(
         if (cand_node == dimension) {  // All nearest neighbors were visited?
             // Choose among all the unvisited nodes the one with the maximum
             // product
-            auto * const pheromone = ctx.pheromone_matrix_ + current_node * dimension;
+            auto * const pheromone = ctx.pheromone_matrix_ + static_cast<size_t>(current_node) * dimension;
             const auto length = tabu.get_length();
             float cand_product = -1;
 
@@ -1488,7 +1488,7 @@ uint32_t reservoir_sampling_roulette_choice(
         float *product_cache,
         char * /* unused */) {
 
-    const auto *product = product_cache + current_node * dimension;
+    const auto *product = product_cache + static_cast<size_t>(current_node) * dimension;
     uint32_t cand_node = dimension;
     float max_key = -FLT_MAX;
     const auto nodes_to_visit_count = tabu.get_length();
@@ -1539,7 +1539,7 @@ uint32_t warp_roulette_choice(
 
     assert( get_warp_count() == 1 );
 
-    auto * const product = product_cache + current_node * dimension;
+    auto * const product = product_cache + static_cast<size_t>(current_node) * dimension;
 
     const auto nodes_to_visit_count = tabu.get_length();
     // Each thread gets a "chunk_size" of nodes and computes corresponding sum
@@ -1633,7 +1633,7 @@ uint32_t block_roulette_choice(
         float *product_cache,
         char * shared_buffer) {
 
-    auto * const product = product_cache + current_node * dimension;
+    auto * const product = product_cache + static_cast<size_t>(current_node) * dimension;
 
     const auto nodes_to_visit_count = tabu.get_length();
     // Each thread gets a "chunk_size" of nodes and computes corresponding sum
@@ -1896,7 +1896,7 @@ void evaporate_pheromone(uint32_t dimension,
     assert(dimension == get_block_count());
 
     const auto node = blockIdx.x;
-    const auto offset = node * dimension;
+    const auto offset = static_cast<size_t>(node) * dimension;
     const float min_trail = trail_limits->min_;
 
     for (uint32_t endpoint = threadIdx.x;
@@ -1930,12 +1930,12 @@ void deposit_pheromone(
         auto node = route[i];
         auto next = route[(i + 1) % dimension];
 
-        auto trail = pheromone[node * dimension + next];
+        auto trail = pheromone[static_cast<size_t>(node) * dimension + next];
         trail = fmin(max_trail, trail + deposit);
 
-        pheromone[node * dimension + next] = trail;
+        pheromone[static_cast<size_t>(node) * dimension + next] = trail;
         if (is_symmetric) {
-            pheromone[next * dimension + node] = trail;
+            pheromone[static_cast<size_t>(next) * dimension + node] = trail;
         }
     }
 }
@@ -1944,7 +1944,7 @@ void deposit_pheromone(
 std::vector<float> create_heuristic_matrix(const ProblemInstance &instance,
                                            MMASParameters params) {
     const auto dim = instance.dimension_;
-    std::vector<float> result(dim * dim);
+    std::vector<float> result(static_cast<size_t>(dim) * dim);
     result.clear();
     for (auto i = 0u; i < dim; ++i) {
         for (auto j = 0u; j < dim; ++j) {
@@ -2369,7 +2369,8 @@ json run_gpu_based_mmas(ProblemInstance &instance,
     cerr << "[DBG] trail_limits done, starting cudaMalloc" << endl;
     device_vector<TrailLimits> d_trail_limits(1, trail_limits);
 
-    device_vector<float> d_pheromone(dimension * dimension, trail_limits.max_);
+    device_vector<float> d_pheromone(static_cast<size_t>(dimension) * dimension,
+                                     trail_limits.max_);
 
     // For coordinate-based instances we recompute distance and heuristic values
     // on the GPU from the node coordinates (see InstanceContext::get_distance /
@@ -2389,7 +2390,7 @@ json run_gpu_based_mmas(ProblemInstance &instance,
     // Convert vector of doubles to vector of floats (empty when on the fly)
     vector<float> dist_matrix;
     if (!compute_dist_on_the_fly) {
-        dist_matrix.resize(dimension * dimension);
+        dist_matrix.resize(static_cast<size_t>(dimension) * dimension);
         auto it = dist_matrix.begin();
         for (const double d : instance.distance_matrix_) {
             *it++ = static_cast<float>(d);
@@ -2452,7 +2453,7 @@ json run_gpu_based_mmas(ProblemInstance &instance,
     // matrix, so allocating it for them just wastes n*n*4 bytes (27.5 GiB for
     // pla85900) and is a primary OOM cause. Allocate it only when needed.
     device_vector<float> d_product_cache(
-        alg.use_cand_lists_ ? 0 : dimension * dimension);
+        alg.use_cand_lists_ ? size_t{0} : static_cast<size_t>(dimension) * dimension);
     device_vector<pair<float, uint32_t>> d_global_best_log(
         MMASRunContext::global_best_log_capacity);
     device_vector<uint32_t> d_global_best_log_length(1, 0);
