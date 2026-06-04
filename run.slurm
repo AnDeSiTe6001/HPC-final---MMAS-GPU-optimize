@@ -13,7 +13,7 @@
 
 # ── 環境設定 ──────────────────────────────────────────────
 module purge
-module load cuda/12.3
+module load cuda/12.8
 module load gcc10/10.2.1
 
 # ── 編譯 ─────────────────────────────────────────────────
@@ -39,7 +39,7 @@ INSTANCE=ALL_tsp/att48.tsp
 
 echo "[$(date)] Running MMAS on: $INSTANCE"
 
-# 用 cuda-compute-sanitizer 偵測 GPU 記憶體錯誤（比直接執行慢但輸出詳細錯誤）
-./mmas --instance=ALL_tsp/att48.tsp
+./mmas --instance=$INSTANCE --ants=100
+
 
 echo "[$(date)] Done."

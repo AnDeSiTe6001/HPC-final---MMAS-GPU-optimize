@@ -1,0 +1,72 @@
+[Fri Jun  5 02:56:42 CST 2026] Building...
+rm -f obj/main.o obj/docopt.o obj/utils.o obj/tsp.o obj/mmas.o mmas obj/link.o
+g++ -pipe -std=c++14 -Wall -pedantic -O2 -mtune=native -march=native -DNDEBUG  -flto -c src/utils.cc -o obj/utils.o
+g++ -pipe -std=c++14 -Wall -pedantic -O2 -mtune=native -march=native -DNDEBUG  -flto -c src/tsp.cc -o obj/tsp.o
+g++ -pipe -std=c++14 -Wall -pedantic -O2 -mtune=native -march=native -DNDEBUG  -flto -c src/main.cc -o obj/main.o
+g++ -pipe -std=c++14 -Wall -pedantic -O2 -mtune=native -march=native -DNDEBUG  -flto -c src/docopt.cc -o obj/docopt.o
+nvcc -std=c++14 -Xptxas="-v"  -gencode arch=compute_70,code=sm_70 -DNDEBUG  -dc src/mmas.cu -o obj/mmas.o
+nvcc -std=c++14 -Xptxas="-v"  -gencode arch=compute_70,code=sm_70 -DNDEBUG  obj/mmas.o -dlink -o obj/link.o
+g++ -pipe -std=c++14 -Wall -pedantic -O2 -mtune=native -march=native -DNDEBUG  -flto obj/main.o obj/docopt.o obj/utils.o obj/tsp.o obj/mmas.o obj/link.o -L/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/lib64 -lcuda -lcudart -o mmas
+[Fri Jun  5 02:57:01 CST 2026] GPU Info:
+Fri Jun  5 02:57:01 2026       
++---------------------------------------------------------------------------------------+
+| NVIDIA-SMI 535.161.08             Driver Version: 535.161.08   CUDA Version: 12.8     |
+|-----------------------------------------+----------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |         Memory-Usage | GPU-Util  Compute M. |
+|                                         |                      |               MIG M. |
+|=========================================+======================+======================|
+|   0  Tesla V100-SXM2-32GB           On  | 00000000:1B:00.0 Off |                    0 |
+| N/A   27C    P0              41W / 300W |      0MiB / 32768MiB |      0%      Default |
+|                                         |                      |                  N/A |
++-----------------------------------------+----------------------+----------------------+
+                                                                                         
++---------------------------------------------------------------------------------------+
+| Processes:                                                                            |
+|  GPU   GI   CI        PID   Type   Process name                            GPU Memory |
+|        ID   ID                                                             Usage      |
+|=======================================================================================|
+|  No running processes found                                                           |
++---------------------------------------------------------------------------------------+
+Gcc version check:
+gcc (GCC) 10.2.1 20210130 (Red Hat 10.2.1-11)
+Copyright (C) 2020 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+[Fri Jun  5 02:57:01 CST 2026] Running MMAS on: ALL_tsp/att48.tsp
+Read line: NAME : att48
+Read line: COMMENT : 48 capitals of the US (Padberg/Rinaldi)
+Read line: TYPE : TSP
+Read line: DIMENSION : 48
+Read line: EDGE_WEIGHT_TYPE : ATT
+Read line: NODE_COORD_SECTION
+Finished loading instance
+
+Starting trial 0
+
+NN sol. cost: 13356
+Max active #blocks for ant sol. build kernel: 24
+0:	Global | Reset | Iter. best costs: 10648 (0.188182%) 	10648	10648
+100:	Global | Reset | Iter. best costs: 10628 (0%) 	10628	10628
+200:	Global | Reset | Iter. best costs: 10628 (0%) 	10628	10628
+300:	Global | Reset | Iter. best costs: 10628 (0%) 	10628	10628
+400:	Global | Reset | Iter. best costs: 10628 (0%) 	10628	10628
+500:	Global | Reset | Iter. best costs: 10628 (0%) 	10628	10628
+600:	Global | Reset | Iter. best costs: 10628 (0%) 	10628	10628
+700:	Global | Reset | Iter. best costs: 10628 (0%) 	10628	10628
+800:	Global | Reset | Iter. best costs: 10628 (0%) 	10628	10628
+900:	Global | Reset | Iter. best costs: 10628 (0%) 	10628	10628
+Elapsed (sec):0.358498
+Final solution cost: 10628 (0%)
+Build sol. kernel mean time [ms]: 0.0420397
+Evaporate pheromone mean time [ms]: 0.00477694
+Heur. & pher. product cache mean update time [ms]: 0
+Cand list product cache mean update time [ms]: 0.00644605
+Update best sol. mean time [ms]: 0.00813188
+Deposit pheromone mean time [ms]: 0.00525544
+Local search time [ms]: 0.233737
+Total time [s]: 0.300387
+Mean iter. time [ms]: 0.300387
+Saving results to: results/mmas_rwm_bt_cl-att48_2026-6-5_2_57_2.json
+[Fri Jun  5 02:57:02 CST 2026] Done.

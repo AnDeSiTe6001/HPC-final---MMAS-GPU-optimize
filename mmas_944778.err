@@ -1,0 +1,224 @@
+--------------------------------
+loading CUDA 12.8 with cuDNN / NCCL
+based on cuda_12.8.0_570.86.10_linux.run
+--------------------------------
+
+--------------------------------
+loading GCC 10.2.1
+based on SCL Developer Toolset 10
+--------------------------------
+
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+ptxas info    : 218320 bytes gmem, 72 bytes cmem[3]
+ptxas info    : Function properties for __internal_accurate_pow
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compile time = 20.498 ms
+ptxas info    : Function properties for __internal_trig_reduction_slowpathd
+    40 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compile time = 6.251 ms
+ptxas info    : Compiling entry function '_Z18build_ant_solutionI11BitmaskTabuXadL_Z34reservoir_sampling_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z18build_ant_solutionI11BitmaskTabuXadL_Z34reservoir_sampling_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext
+    16 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 55 registers, used 1 barriers, 528 bytes cmem[0], 272 bytes cmem[2]
+ptxas info    : Compile time = 46.701 ms
+ptxas info    : Compiling entry function '_Z18build_ant_solutionI11CompactTabuXadL_Z34reservoir_sampling_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z18build_ant_solutionI11CompactTabuXadL_Z34reservoir_sampling_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext
+    16 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 54 registers, used 1 barriers, 528 bytes cmem[0], 272 bytes cmem[2]
+ptxas info    : Compile time = 46.478 ms
+ptxas info    : Compiling entry function '_Z18build_ant_solutionI18CompressedListTabuXadL_Z34reservoir_sampling_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z18build_ant_solutionI18CompressedListTabuXadL_Z34reservoir_sampling_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext
+    16 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 54 registers, used 1 barriers, 528 bytes cmem[0], 272 bytes cmem[2]
+ptxas info    : Compile time = 45.466 ms
+ptxas info    : Compiling entry function '_Z18build_ant_solutionI11BitmaskTabuXadL_Z21block_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z18build_ant_solutionI11BitmaskTabuXadL_Z21block_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext
+    16 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 57 registers, used 1 barriers, 528 bytes cmem[0], 272 bytes cmem[2]
+ptxas info    : Compile time = 69.773 ms
+ptxas info    : Compiling entry function '_Z18build_ant_solutionI11BitmaskTabuXadL_Z20warp_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z18build_ant_solutionI11BitmaskTabuXadL_Z20warp_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext
+    16 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 55 registers, used 1 barriers, 528 bytes cmem[0], 272 bytes cmem[2]
+ptxas info    : Compile time = 61.817 ms
+ptxas info    : Compiling entry function '_Z18build_ant_solutionI11CompactTabuXadL_Z21block_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z18build_ant_solutionI11CompactTabuXadL_Z21block_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext
+    16 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 57 registers, used 1 barriers, 528 bytes cmem[0], 272 bytes cmem[2]
+ptxas info    : Compile time = 86.593 ms
+ptxas info    : Compiling entry function '_Z18build_ant_solutionI11CompactTabuXadL_Z20warp_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z18build_ant_solutionI11CompactTabuXadL_Z20warp_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext
+    16 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 57 registers, used 1 barriers, 528 bytes cmem[0], 272 bytes cmem[2]
+ptxas info    : Compile time = 79.714 ms
+ptxas info    : Compiling entry function '_Z18build_ant_solutionI18CompressedListTabuXadL_Z21block_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z18build_ant_solutionI18CompressedListTabuXadL_Z21block_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext
+    16 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 57 registers, used 1 barriers, 528 bytes cmem[0], 272 bytes cmem[2]
+ptxas info    : Compile time = 83.895 ms
+ptxas info    : Compiling entry function '_Z18build_ant_solutionI18CompressedListTabuXadL_Z20warp_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z18build_ant_solutionI18CompressedListTabuXadL_Z20warp_roulette_choiceIS0_EjjR17curandStateXORWOWjRT_PfPcEEEv15InstanceContextPS2_14MMASRunContext
+    16 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 56 registers, used 1 barriers, 528 bytes cmem[0], 272 bytes cmem[2]
+ptxas info    : Compile time = 79.765 ms
+ptxas info    : Compiling entry function '_Z35build_ant_solution_using_cand_listsI11CompactTabuXadL_Z49reservoir_sampling_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z35build_ant_solution_using_cand_listsI11CompactTabuXadL_Z49reservoir_sampling_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext
+    8 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 78 registers, used 1 barriers, 528 bytes cmem[0], 288 bytes cmem[2]
+ptxas info    : Compile time = 100.761 ms
+ptxas info    : Compiling entry function '_Z35build_ant_solution_using_cand_listsI11BitmaskTabuXadL_Z49reservoir_sampling_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z35build_ant_solution_using_cand_listsI11BitmaskTabuXadL_Z49reservoir_sampling_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext
+    8 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 74 registers, used 1 barriers, 528 bytes cmem[0], 288 bytes cmem[2]
+ptxas info    : Compile time = 101.723 ms
+ptxas info    : Compiling entry function '_Z35build_ant_solution_using_cand_listsI18CompressedListTabuXadL_Z49reservoir_sampling_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z35build_ant_solution_using_cand_listsI18CompressedListTabuXadL_Z49reservoir_sampling_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext
+    8 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 73 registers, used 1 barriers, 528 bytes cmem[0], 288 bytes cmem[2]
+ptxas info    : Compile time = 97.797 ms
+ptxas info    : Compiling entry function '_Z35build_ant_solution_using_cand_listsI11CompactTabuXadL_Z36block_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z35build_ant_solution_using_cand_listsI11CompactTabuXadL_Z36block_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext
+    8 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 79 registers, used 1 barriers, 528 bytes cmem[0], 288 bytes cmem[2]
+ptxas info    : Compile time = 100.102 ms
+ptxas info    : Compiling entry function '_Z35build_ant_solution_using_cand_listsI11CompactTabuXadL_Z35warp_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z35build_ant_solution_using_cand_listsI11CompactTabuXadL_Z35warp_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext
+    8 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 79 registers, used 1 barriers, 528 bytes cmem[0], 288 bytes cmem[2]
+ptxas info    : Compile time = 93.982 ms
+ptxas info    : Compiling entry function '_Z35build_ant_solution_using_cand_listsI11BitmaskTabuXadL_Z36block_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z35build_ant_solution_using_cand_listsI11BitmaskTabuXadL_Z36block_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext
+    8 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 77 registers, used 1 barriers, 528 bytes cmem[0], 288 bytes cmem[2]
+ptxas info    : Compile time = 99.833 ms
+ptxas info    : Compiling entry function '_Z35build_ant_solution_using_cand_listsI11BitmaskTabuXadL_Z35warp_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z35build_ant_solution_using_cand_listsI11BitmaskTabuXadL_Z35warp_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext
+    8 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 77 registers, used 1 barriers, 528 bytes cmem[0], 288 bytes cmem[2]
+ptxas info    : Compile time = 96.813 ms
+ptxas info    : Compiling entry function '_Z35build_ant_solution_using_cand_listsI18CompressedListTabuXadL_Z36block_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z35build_ant_solution_using_cand_listsI18CompressedListTabuXadL_Z36block_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext
+    8 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 78 registers, used 1 barriers, 528 bytes cmem[0], 288 bytes cmem[2]
+ptxas info    : Compile time = 95.790 ms
+ptxas info    : Compiling entry function '_Z35build_ant_solution_using_cand_listsI18CompressedListTabuXadL_Z35warp_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z35build_ant_solution_using_cand_listsI18CompressedListTabuXadL_Z35warp_roulette_choice_from_cand_listIS0_Ej15InstanceContextR17curandStateXORWOWjPfRT_EEEvS2_PS3_14MMASRunContext
+    8 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 76 registers, used 1 barriers, 528 bytes cmem[0], 288 bytes cmem[2]
+ptxas info    : Compile time = 88.317 ms
+ptxas info    : Compiling entry function '_Z10two_opt_nn15InstanceContextPjPiPaPf' for 'sm_70'
+ptxas info    : Function properties for _Z10two_opt_nn15InstanceContextPjPiPaPf
+    8 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 68 registers, used 1 barriers, 17 bytes smem, 440 bytes cmem[0], 272 bytes cmem[2]
+ptxas info    : Compile time = 283.387 ms
+ptxas info    : Compiling entry function '_Z16fill_float_arrayPfmf' for 'sm_70'
+ptxas info    : Function properties for _Z16fill_float_arrayPfmf
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 14 registers, used 0 barriers, 372 bytes cmem[0]
+ptxas info    : Compile time = 1.361 ms
+ptxas info    : Compiling entry function '_Z17deposit_pheromonejPfS_PjP11TrailLimitsb' for 'sm_70'
+ptxas info    : Function properties for _Z17deposit_pheromonejPfS_PjP11TrailLimitsb
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 24 registers, used 0 barriers, 393 bytes cmem[0]
+ptxas info    : Compile time = 3.999 ms
+ptxas info    : Compiling entry function '_Z19evaporate_pheromonejPffP11TrailLimitsb' for 'sm_70'
+ptxas info    : Function properties for _Z19evaporate_pheromonejPffP11TrailLimitsb
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 12 registers, used 0 barriers, 385 bytes cmem[0]
+ptxas info    : Compile time = 1.680 ms
+ptxas info    : Compiling entry function '_Z15init_rng_statesP17curandStateXORWOWjj' for 'sm_70'
+ptxas info    : Function properties for _Z15init_rng_statesP17curandStateXORWOWjj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 0 barriers, 368 bytes cmem[0]
+ptxas info    : Compile time = 10.559 ms
+ptxas info    : Compiling entry function '_Z21zero_reset_route_cost14MMASRunContext' for 'sm_70'
+ptxas info    : Function properties for _Z21zero_reset_route_cost14MMASRunContext
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 8 registers, used 0 barriers, 464 bytes cmem[0]
+ptxas info    : Compile time = 0.457 ms
+ptxas info    : Compiling entry function '_Z35update_global_best_and_trail_limits14MMASRunContextjP11TrailLimits14MMASParametersj' for 'sm_70'
+ptxas info    : Function properties for _Z35update_global_best_and_trail_limits14MMASRunContextjP11TrailLimits14MMASParametersj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 24 registers, used 1 barriers, 524 bytes cmem[0]
+ptxas info    : Compile time = 19.293 ms
+ptxas info    : Compiling entry function '_Z40update_pheromone_heuristic_product_cache15InstanceContext14MMASRunContextb' for 'sm_70'
+ptxas info    : Function properties for _Z40update_pheromone_heuristic_product_cache15InstanceContext14MMASRunContextb
+    16 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 44 registers, used 0 barriers, 521 bytes cmem[0], 272 bytes cmem[2]
+ptxas info    : Compile time = 25.638 ms
+ptxas info    : Compiling entry function '_Z51update_cand_lists_pheromone_heuristic_product_cache15InstanceContext14MMASRunContextb' for 'sm_70'
+ptxas info    : Function properties for _Z51update_cand_lists_pheromone_heuristic_product_cache15InstanceContext14MMASRunContextb
+    16 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 48 registers, used 0 barriers, 521 bytes cmem[0], 272 bytes cmem[2]
+ptxas info    : Compile time = 25.781 ms
+ptxas info    : Function properties for _Z21reverse_route_segmentiiiPjPi
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compile time = 2.706 ms
+ptxas info    : Function properties for _Z25two_opt_nn_find_candidatejPjPaRjS1_
+    8 bytes stack frame, 8 bytes spill stores, 8 bytes spill loads
+ptxas info    : Compile time = 3.510 ms
+ptxas info    : Function properties for _Z16get_warp_lane_idv
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compile time = 0.440 ms
+ptxas info    : Function properties for _Z25update_best_solutions_logR14MMASRunContextfj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compile time = 0.935 ms
+ptxas info    : Function properties for _Z26calc_chunk_size_per_threadj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compile time = 1.254 ms
+ptxas info    : Function properties for _Z26par_calculate_route_lengthRK15InstanceContextPjPc
+    48 bytes stack frame, 32 bytes spill stores, 32 bytes spill loads
+ptxas info    : Compile time = 26.144 ms
+ptxas info    : Function properties for _Z17calc_trail_limitsjfff
+    8 bytes stack frame, 8 bytes spill stores, 8 bytes spill loads
+ptxas info    : Compile time = 4.508 ms
+ptxas info    : Function properties for _Z9atomicMaxPff
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compile time = 1.108 ms
+ptxas info    : Function properties for _Z15block_vote_lastb
+    8 bytes stack frame, 8 bytes spill stores, 8 bytes spill loads
+ptxas info    : Compile time = 1.909 ms
+ptxas info    : Function properties for _Z10block_voteb
+    8 bytes stack frame, 8 bytes spill stores, 8 bytes spill loads
+ptxas info    : Compile time = 2.043 ms
+ptxas info    : Function properties for _Z10block_scanf
+    8 bytes stack frame, 8 bytes spill stores, 8 bytes spill loads
+ptxas info    : Compile time = 4.931 ms
+ptxas info    : Function properties for _Z21block_arg_max_atomicsjf
+    8 bytes stack frame, 8 bytes spill stores, 8 bytes spill loads
+ptxas info    : Compile time = 6.587 ms
+ptxas info    : Function properties for _Z9block_sumfPc
+    8 bytes stack frame, 8 bytes spill stores, 8 bytes spill loads
+ptxas info    : Compile time = 3.819 ms
+ptxas info    : Function properties for _Z13block_arg_maxjfPc
+    8 bytes stack frame, 8 bytes spill stores, 8 bytes spill loads
+ptxas info    : Compile time = 8.815 ms
+ptxas info    : Function properties for _Z14warp_vote_lastbj
+    8 bytes stack frame, 8 bytes spill stores, 8 bytes spill loads
+ptxas info    : Compile time = 1.064 ms
+ptxas info    : Function properties for _Z9warp_votebj
+    8 bytes stack frame, 8 bytes spill stores, 8 bytes spill loads
+ptxas info    : Compile time = 1.056 ms
+ptxas info    : Function properties for _Z20get_global_thread_idv
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compile time = 0.471 ms
+ptxas info    : Function properties for _Z15get_block_countv
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compile time = 0.394 ms
+ptxas info    : Function properties for _Z11get_warp_idv
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compile time = 0.415 ms
+ptxas info    : Function properties for _Z14get_warp_countv
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compile time = 0.419 ms
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+[DBG] main() start
+[DBG] args parsed
+[DBG] best-known loaded
+[DBG] run_mmas_experiment() start
+[DBG] loading instance: ALL_tsp/att48.tsp
+[DBG] instance loaded, dim=48
+[DBG] run_gpu_based_mmas() start, dim=48
+[DBG] calling calc_initial_trail_limits
+[DBG] trail_limits done, starting cudaMalloc
+[DBG] experiment done

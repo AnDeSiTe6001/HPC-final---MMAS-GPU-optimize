@@ -1,0 +1,130 @@
+Generating SQLite file profiles/mmas_rwm_bt_cl_pla33810.sqlite from profiles/mmas_rwm_bt_cl_pla33810.nsys-rep
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/nvtx_sum.py]... 
+SKIPPED: profiles/mmas_rwm_bt_cl_pla33810.sqlite does not contain NV Tools Extension (NVTX) data.
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/osrt_sum.py]... 
+
+ ** OS Runtime Summary (osrt_sum):
+
+ Time (%)  Total Time (ns)  Num Calls     Avg (ns)        Med (ns)     Min (ns)     Max (ns)       StdDev (ns)              Name         
+ --------  ---------------  ---------  ---------------  -------------  --------  --------------  ----------------  ----------------------
+     33.8   29,131,227,442          8  3,641,403,430.3    3,646,880.5   304,579  28,891,431,412  10,202,680,535.5  sem_wait              
+     33.7   29,076,801,305        304     95,647,372.7  100,122,077.5     2,840     140,390,968      20,604,762.2  poll                  
+     32.4   28,002,215,683         20  1,400,110,784.2       41,703.0    14,619   4,000,107,667   1,957,428,147.8  sem_timedwait         
+      0.1       79,423,996        702        113,139.6       34,663.5     1,084      33,153,337       1,262,349.6  ioctl                 
+      0.0        8,286,415          3      2,762,138.3      167,667.0   159,071       7,959,677       4,501,202.6  fopen64               
+      0.0        7,168,271         35        204,807.7        1,235.0     1,034       7,113,008       1,202,043.5  fclose                
+      0.0        1,859,721         41         45,359.0        5,590.0     4,240       1,463,635         227,291.7  mmap64                
+      0.0          612,247         42         14,577.3        2,623.0     1,485         222,120          40,717.0  fopen                 
+      0.0          456,584          5         91,316.8       87,679.0    78,260         112,350          13,998.5  pthread_create        
+      0.0          415,345         17         24,432.1        4,508.0     1,966         300,492          71,579.4  mmap                  
+      0.0          342,957         69          4,970.4        4,861.0     1,009          11,641           2,069.8  open64                
+      0.0          227,440         96          2,369.2        2,201.0     1,003           6,203             775.4  read                  
+      0.0          223,021          1        223,021.0      223,021.0   223,021         223,021               0.0  pthread_cond_wait     
+      0.0          199,382          1        199,382.0      199,382.0   199,382         199,382               0.0  writev                
+      0.0           53,699          1         53,699.0       53,699.0    53,699          53,699               0.0  fgets                 
+      0.0           49,625         14          3,544.6        3,711.5     1,911           4,948             961.3  write                 
+      0.0           40,570          8          5,071.3        3,549.0     2,041          14,033           3,950.9  munmap                
+      0.0           36,121         14          2,580.1        1,897.0     1,009           6,000           1,819.0  fwrite                
+      0.0           33,523          7          4,789.0        5,109.0     3,488           6,429           1,065.2  fflush                
+      0.0           28,475          7          4,067.9        3,764.0     1,226           7,293           2,248.1  open                  
+      0.0           12,027          2          6,013.5        6,013.5     1,890          10,137           5,831.5  pthread_cond_broadcast
+      0.0           11,400          3          3,800.0        4,412.0     2,303           4,685           1,303.6  pipe2                 
+      0.0           10,969          2          5,484.5        5,484.5     3,543           7,426           2,745.7  socket                
+      0.0            8,404          1          8,404.0        8,404.0     8,404           8,404               0.0  connect               
+      0.0            7,052          3          2,350.7        1,163.0     1,099           4,790           2,112.8  fcntl                 
+      0.0            1,556          1          1,556.0        1,556.0     1,556           1,556               0.0  bind                  
+      0.0            1,103          1          1,103.0        1,103.0     1,103           1,103               0.0  listen                
+      0.0            1,096          1          1,096.0        1,096.0     1,096           1,096               0.0  putc                  
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/cuda_api_sum.py]... 
+
+ ** CUDA API Summary (cuda_api_sum):
+
+ Time (%)  Total Time (ns)  Num Calls    Avg (ns)    Med (ns)   Min (ns)   Max (ns)     StdDev (ns)            Name         
+ --------  ---------------  ---------  ------------  ---------  --------  -----------  -------------  ----------------------
+     99.6   28,818,823,235        300  96,062,744.1  813,899.5     1,507  591,797,837  206,578,055.5  cudaEventSynchronize  
+      0.4      103,812,948         22   4,718,770.4    4,899.0       132  101,905,978   21,707,832.1  cudaMalloc            
+      0.0       11,764,084        302      38,953.9    3,939.0     1,843   10,167,631      584,919.5  cudaLaunchKernel      
+      0.0        7,455,959         29     257,102.0   13,766.0       132    5,927,582    1,101,970.8  cudaMemcpy            
+      0.0        3,392,443         19     178,549.6    6,024.0     2,986    2,142,579      483,126.6  cudaFree              
+      0.0        2,026,529        600       3,377.5    3,119.5     2,506       14,343        1,079.9  cudaEventRecord       
+      0.0           18,975         14       1,355.4      432.0       389        9,448        2,428.1  cudaEventCreate       
+      0.0           10,993         14         785.2      441.5       329        5,147        1,257.5  cudaEventDestroy      
+      0.0            6,116          1       6,116.0    6,116.0     6,116        6,116            0.0  cudaDeviceSynchronize 
+      0.0            1,027          1       1,027.0    1,027.0     1,027        1,027            0.0  cuModuleGetLoadingMode
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/cuda_gpu_kern_sum.py]... 
+
+ ** CUDA GPU Kernel Summary (cuda_gpu_kern_sum):
+
+ Time (%)  Total Time (ns)  Instances    Avg (ns)       Med (ns)      Min (ns)     Max (ns)    StdDev (ns)                                                   Name                                                
+ --------  ---------------  ---------  -------------  -------------  -----------  -----------  ------------  ----------------------------------------------------------------------------------------------------
+     96.6   27,837,458,124         50  556,749,162.5  562,788,731.0  513,805,452  591,794,711  18,588,852.5  void build_ant_solution_using_cand_lists<BitmaskTabu, &warp_roulette_choice_from_cand_list<BitmaskT…
+      2.6      759,366,965         50   15,187,339.3   15,188,104.0   15,162,376   15,208,680      11,701.5  evaporate_pheromone(unsigned int, float *, float, TrailLimits *, bool)                              
+      0.7      207,780,178         50    4,155,603.6    4,503,916.5    1,416,341    4,533,020     933,760.2  update_global_best_and_trail_limits(MMASRunContext, unsigned int, TrailLimits *, MMASParameters, un…
+      0.0       10,185,616         50      203,712.3      203,967.0      200,062      206,623       1,743.9  deposit_pheromone(unsigned int, float *, float *, unsigned int *, TrailLimits *, bool)              
+      0.0        6,518,795          1    6,518,795.0    6,518,795.0    6,518,795    6,518,795           0.0  fill_float_array(float *, unsigned long, float)                                                     
+      0.0        3,146,533         50       62,930.7       62,752.0       61,247       70,720       1,315.5  update_cand_lists_pheromone_heuristic_product_cache(InstanceContext, MMASRunContext, bool)          
+      0.0          219,327          1      219,327.0      219,327.0      219,327      219,327           0.0  init_rng_states(curandStateXORWOW *, unsigned int, unsigned int)                                    
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/cuda_gpu_mem_time_sum.py]... 
+
+ ** CUDA GPU MemOps Summary (by Time) (cuda_gpu_mem_time_sum):
+
+ Time (%)  Total Time (ns)  Count  Avg (ns)  Med (ns)  Min (ns)  Max (ns)  StdDev (ns)           Operation          
+ --------  ---------------  -----  --------  --------  --------  --------  -----------  ----------------------------
+     94.9          767,386      8  95,923.3   1,392.0     1,344   707,419    247,699.4  [CUDA memcpy Host-to-Device]
+      5.1           41,343     19   2,175.9   1,504.0     1,376    11,616      2,383.2  [CUDA memcpy Device-to-Host]
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/cuda_gpu_mem_size_sum.py]... 
+
+ ** CUDA GPU MemOps Summary (by Size) (cuda_gpu_mem_size_sum):
+
+ Total (MB)  Count  Avg (MB)  Med (MB)  Min (MB)  Max (MB)  StdDev (MB)           Operation          
+ ----------  -----  --------  --------  --------  --------  -----------  ----------------------------
+      4.869      8     0.609     0.000     0.000     4.328        1.515  [CUDA memcpy Host-to-Device]
+      0.175     19     0.009     0.000     0.000     0.135        0.032  [CUDA memcpy Device-to-Host]
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/openmp_sum.py]... 
+SKIPPED: profiles/mmas_rwm_bt_cl_pla33810.sqlite does not contain OpenMP event data.
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/opengl_khr_range_sum.py]... 
+SKIPPED: profiles/mmas_rwm_bt_cl_pla33810.sqlite does not contain KHR Extension (KHR_DEBUG) data.
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/opengl_khr_gpu_range_sum.py]... 
+SKIPPED: profiles/mmas_rwm_bt_cl_pla33810.sqlite does not contain GPU KHR Extension (KHR_DEBUG) data.
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/vulkan_marker_sum.py]... 
+SKIPPED: profiles/mmas_rwm_bt_cl_pla33810.sqlite does not contain Vulkan Debug Extension (Vulkan Debug Util) data.
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/vulkan_gpu_marker_sum.py]... 
+SKIPPED: profiles/mmas_rwm_bt_cl_pla33810.sqlite does not contain GPU Vulkan Debug Extension (GPU Vulkan Debug markers) data.
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/dx11_pix_sum.py]... 
+SKIPPED: profiles/mmas_rwm_bt_cl_pla33810.sqlite does not contain DX11 CPU debug markers.
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/dx12_gpu_marker_sum.py]... 
+SKIPPED: profiles/mmas_rwm_bt_cl_pla33810.sqlite does not contain DX12 GPU debug markers.
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/dx12_pix_sum.py]... 
+SKIPPED: profiles/mmas_rwm_bt_cl_pla33810.sqlite does not contain DX12 CPU debug markers.
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/wddm_queue_sum.py]... 
+SKIPPED: profiles/mmas_rwm_bt_cl_pla33810.sqlite does not contain WDDM context data.
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/um_sum.py]... 
+SKIPPED: profiles/mmas_rwm_bt_cl_pla33810.sqlite does not contain CUDA Unified Memory CPU page faults data.
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/um_total_sum.py]... 
+SKIPPED: profiles/mmas_rwm_bt_cl_pla33810.sqlite does not contain CUDA Unified Memory CPU page faults data.
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/um_cpu_page_faults_sum.py]... 
+SKIPPED: profiles/mmas_rwm_bt_cl_pla33810.sqlite does not contain CUDA Unified Memory CPU page faults data.
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/openacc_sum.py]... 
+SKIPPED: profiles/mmas_rwm_bt_cl_pla33810.sqlite does not contain OpenACC event data.
+
+Processing [profiles/mmas_rwm_bt_cl_pla33810.sqlite] with [/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/syscall_sum.py]... 
+SKIPPED: profiles/mmas_rwm_bt_cl_pla33810.sqlite does not contain syscall data.
+

@@ -1,0 +1,112 @@
+{
+  "algorithm": "mmas_rwm_bt_cl",
+  "arguments": {
+    "--alg": "mmas_rwm_bt_cl",
+    "--ants": "100",
+    "--block-warps": "1",
+    "--cand-list-size": "32",
+    "--help": false,
+    "--instance": "ALL_tsp/att48.tsp",
+    "--iter": "1000",
+    "--ls": "1",
+    "--ls-block-warps": "0",
+    "--results-dir": "results",
+    "--rho": "0.9",
+    "--seed": "0",
+    "--trials": "1",
+    "--version": false
+  },
+  "experiment-finished-at": "2026-6-4 15:35:43",
+  "experiment-started-at": "2026-6-4 15:35:43",
+  "instance": {
+    "dimension": 48,
+    "is-symmetric": true,
+    "name": "att48"
+  },
+  "iterations-count": 1000,
+  "ls-block-warps": 1,
+  "mmas-parameters": {
+    "ants": 100,
+    "beta": 2.0,
+    "cand-list-size": 32,
+    "p-best": 0.01,
+    "rho": 0.8999999761581421,
+    "use-cand-lists": true
+  },
+  "rng-seed": 2732517643,
+  "trials": [
+    {
+      "best-solution-error": 0.0,
+      "best-solutions-log": [
+        [
+          10628.0,
+          0
+        ]
+      ],
+      "final-solution-cost": 10628,
+      "final-solution-route": [
+        5,
+        27,
+        6,
+        17,
+        43,
+        30,
+        37,
+        7,
+        0,
+        8,
+        39,
+        14,
+        11,
+        10,
+        12,
+        24,
+        13,
+        22,
+        2,
+        21,
+        15,
+        40,
+        33,
+        28,
+        1,
+        25,
+        3,
+        34,
+        44,
+        9,
+        23,
+        41,
+        4,
+        47,
+        38,
+        31,
+        20,
+        46,
+        19,
+        32,
+        45,
+        35,
+        29,
+        42,
+        16,
+        26,
+        18,
+        36
+      ],
+      "initialization-time": 0.123851712,
+      "kernel-mean-times": {
+        "best-solution-update": 8.177789000000001e-06,
+        "cand-list-product-cache-update": 5.1876970000000005e-06,
+        "local-search": 0.000101917275,
+        "pheromone-deposit": 5.34164964964965e-06,
+        "pheromone-evaporate": 4.9058670000000005e-06,
+        "product-cache-update": 0.0,
+        "solution-build": 4.1676832e-05
+      },
+      "mean-iteration-time": 0.00016720176790840924,
+      "total-time": 0.22130822400000003
+    }
+  ],
+  "trials-count": 1
+}

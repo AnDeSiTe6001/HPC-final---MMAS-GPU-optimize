@@ -1,0 +1,102 @@
+[Fri Jun  5 02:50:15 CST 2026] Building...
+rm -f obj/main.o obj/docopt.o obj/utils.o obj/tsp.o obj/mmas.o mmas obj/link.o
+g++ -pipe -std=c++14 -Wall -pedantic -O2 -mtune=native -march=native -DNDEBUG  -flto -c src/docopt.cc -o obj/docopt.o
+g++ -pipe -std=c++14 -Wall -pedantic -O2 -mtune=native -march=native -DNDEBUG  -flto -c src/tsp.cc -o obj/tsp.o
+g++ -pipe -std=c++14 -Wall -pedantic -O2 -mtune=native -march=native -DNDEBUG  -flto -c src/main.cc -o obj/main.o
+g++ -pipe -std=c++14 -Wall -pedantic -O2 -mtune=native -march=native -DNDEBUG  -flto -c src/utils.cc -o obj/utils.o
+nvcc -std=c++14 -Xptxas="-v"  -gencode arch=compute_70,code=sm_70 -DNDEBUG  -dc src/mmas.cu -o obj/mmas.o
+nvcc -std=c++14 -Xptxas="-v"  -gencode arch=compute_70,code=sm_70 -DNDEBUG  obj/mmas.o -dlink -o obj/link.o
+g++ -pipe -std=c++14 -Wall -pedantic -O2 -mtune=native -march=native -DNDEBUG  -flto obj/main.o obj/docopt.o obj/utils.o obj/tsp.o obj/mmas.o obj/link.o -L/work/HPC_SYS/twnia2/pkg-rocky8/nvidia/cuda/cuda-12.8/lib64 -lcuda -lcudart -o mmas
+Fri Jun  5 02:50:34 2026       
++---------------------------------------------------------------------------------------+
+| NVIDIA-SMI 535.161.08             Driver Version: 535.161.08   CUDA Version: 12.8     |
+|-----------------------------------------+----------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |         Memory-Usage | GPU-Util  Compute M. |
+|                                         |                      |               MIG M. |
+|=========================================+======================+======================|
+|   0  Tesla V100-SXM2-32GB           On  | 00000000:1B:00.0 Off |                    0 |
+| N/A   27C    P0              41W / 300W |      0MiB / 32768MiB |      0%      Default |
+|                                         |                      |                  N/A |
++-----------------------------------------+----------------------+----------------------+
+                                                                                         
++---------------------------------------------------------------------------------------+
+| Processes:                                                                            |
+|  GPU   GI   CI        PID   Type   Process name                            GPU Memory |
+|        ID   ID                                                             Usage      |
+|=======================================================================================|
+|  No running processes found                                                           |
++---------------------------------------------------------------------------------------+
+[Fri Jun  5 02:50:34 CST 2026] nsys profiling...
+Read line: NAME : pla33810
+Read line: COMMENT : Programmed logic array (Johnson)
+Read line: TYPE : TSP
+Read line: DIMENSION : 33810
+Read line: EDGE_WEIGHT_TYPE : CEIL_2D
+Read line: NODE_COORD_SECTION 
+Finished loading instance
+
+Starting trial 0
+
+NN sol. cost: 8.27927e+07
+Max active #blocks for ant sol. build kernel: 21
+0:	Global | Reset | Iter. best costs: 1.40416e+08 (112.594%) 	1.40416e+08	1.40416e+08
+Elapsed (sec):28.8241
+Final solution cost: 95320960 (44.3187%)
+Build sol. kernel mean time [ms]: 556.76
+Evaporate pheromone mean time [ms]: 15.195
+Heur. & pher. product cache mean update time [ms]: 0
+Cand list product cache mean update time [ms]: 0.0698556
+Update best sol. mean time [ms]: 4.16385
+Deposit pheromone mean time [ms]: 0.210203
+Local search time [ms]: 0.0125716
+Total time [s]: 28.8206
+Mean iter. time [ms]: 576.411
+Saving results to: results/mmas_rwm_bt_cl-pla33810_2026-6-5_2_51_5.json
+Collecting data...
+Generating '/tmp/nsys-report-405c.qdstrm'
+[1/1] [0%                          ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [0%                          ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [11%                         ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [13%                         ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [14%                         ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [=15%                        ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [=16%                        ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [=====31%                    ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [=========45%                ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [===========50%              ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [===========51%              ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [============54%             ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [============56%             ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [=============59%            ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [==============62%           ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [==============64%           ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [===============67%          ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [================69%         ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [=================72%        ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [=================74%        ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [==================77%       ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [===================80%      ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [===================82%      ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [====================85%     ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [=====================87%    ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [======================90%   ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [======================92%   ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [=======================95%  ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [=======================96%  ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [========================98% ] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [========================100%] mmas_rwm_bt_cl_pla33810.nsys-rep[1/1] [========================100%] mmas_rwm_bt_cl_pla33810.nsys-rep
+Generated:
+    /home/o11a1o111ai/GPU-based-MMAS/profiles/mmas_rwm_bt_cl_pla33810.nsys-rep
+[Fri Jun  5 02:51:10 CST 2026] ncu profiling (build_ant_solution kernel)...
+
+GPU-based MMAS.
+
+  Usage:
+    mmas --instance=<path> [--alg=<str>] [--block-warps=<n>]
+         [--trials=<n>] [--iter=<n>]
+         [--ants=<n>] [--cand-list-size=<n>]
+         [--rho=<n>] [--ls=<n>]
+         [--seed=<n>] [--results-dir=<path>]
+         [--ls-block-warps=<n>]
+    mmas (-h | --help)
+    mmas --version
+
+  Options:
+    --instance=<path>       Path to a TSP instance in TSPLIB format.
+    --alg=<str>             Name of the alg. to run (
+                            mmas_rwm_lc, mmas_rwm_ct, mmas_rwm_bt,
+                            mmas_wrs_lc, mmas_wrs_ct, mmas_wrs_bt -
+                            optionally with _cl suffix for candidate lists use
+                            ) [default: mmas_rwm_bt_cl]
+    --block-warps=<n>       Number of warps (each with 32 threads) per block
+                            of the sol. build kernel [default: 1]
+    --trials=<n>            Number of trials (alg. runs or repetitions)
+                            [default: 1]
+    --iter=<n>              Number of iterations per trial - if 0 is given then 
+                            it is set so that 1 million sol. are build [default: 1000]
+    --ants=<n>              Number of ants, if 0 then #ants equals the size
+                            of a problem (TSP instance) [default: 100]
+    --seed=<n>              Seed for the random number generator, if 0 time-based
+                            value is used [default: 0]
+    --cand-list-size=<n>    Size of the candidate lists used in the MMAS,
+                            needs to be a multiple of 32 [default: 32]
+    --results-dir=<path>    Where to save the file with results. If it does not
+                            exist, it will be created [default: results]
+    --ls=<n>                Local search alg.: 0 - none, 1 - 2-opt [default: 1]
+    --ls-block-warps=<n>    # warps per block used by the LS, if 0 a heuristic is used [default: 0]
+    --rho=<n>               How fast pheromone evaporates (1-rho) [default: 0.9]
+    -h --help               Display help screen.
+    --version               Display version.
+
+==ERROR== The application returned an error code (255).
