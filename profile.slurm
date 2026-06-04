@@ -24,11 +24,9 @@ module purge
 module load cuda/12.8
 module load gcc10/10.2.1
 
-# 本叢集 cuda/12.3 不含 Nsight 工具本體：nsys 直接 command not found，
-# ncu 只有 wrapper。兩者都得靠獨立 module。先查實際名稱：
-#   module spider nsight-systems / module spider nsight-compute
-#   module avail 2>&1 | grep -i nsight
-# 查到後把下面換成完整名稱（如 nsight-systems/2023.4）。找不到就會自動略過該段。
+# Nsight 工具版本相依：cuda/12.3 不含 nsys/ncu 本體（nsys command not found、
+# ncu 只有 wrapper）。改用 cuda/12.8 後 nsys 與 ncu 都內建可用，故這裡載 12.8。
+# 若改回較舊的 cuda module，下面的 command -v / ncu --version 偵測會自動略過該段。
 
 echo "[$(date)] Building..."
 make clean
@@ -37,7 +35,10 @@ make -j4 || { echo "Build failed."; exit 1; }
 # ── profiling 目標 ────────────────────────────────────────────
 INSTANCE=ALL_tsp/pla33810.tsp     # 改成 pla85900 需先修 OOM
 ALG=mmas_rwm_bt_cl                  # 與預設一致；_cl 需 block-warps*32 == cand-list-size
-ARGS="--instance=${INSTANCE} --alg=${ALG} --iter=50 --trials=1 --seed=42"
+# --iter 不放共用 ARGS：docopt 不接受重複 flag，nsys/ncu 各自帶一次自己的 iter 數。
+COMMON_ARGS="--instance=${INSTANCE} --alg=${ALG} --trials=1 --seed=42"
+NSYS_ITER=50      # nsys 輕量，可跑完整 iters 看時間軸
+NCU_ITER=5        # ncu 每 kernel replay 多次很慢，iter 設很小
 TAG="${ALG}_$(basename ${INSTANCE} .tsp)"
 mkdir -p profiles
 
@@ -52,13 +53,13 @@ if command -v nsys >/dev/null 2>&1; then
         --cuda-memory-usage=true \
         --force-overwrite=true \
         --output=profiles/${TAG} \
-        ./mmas ${ARGS}
+        ./mmas ${COMMON_ARGS} --iter=${NSYS_ITER}
     # 產出：profiles/${TAG}.nsys-rep
     nsys stats profiles/${TAG}.nsys-rep > profiles/${TAG}_nsys_summary.txt 2>&1 || true
 else
     echo "[$(date)] WARNING: nsys (Nsight Systems) 不可用，略過時間軸分析。"
-    echo "  cuda/12.3 未附帶 nsys。請執行 module spider nsight-systems 找獨立 module，"
-    echo "  在腳本上方 module load 區塊填入完整名稱後重跑。"
+    echo "  目前的 cuda module 未附帶 nsys。確認已 module load cuda/12.8（內建 nsys），"
+    echo "  或 module spider nsight-systems 找獨立 module 後重跑。"
 fi
 
 # ── 2) Nsight Compute：單一 kernel 的細部指標（記憶體吞吐 / 佔用率 / 瓶頸）──
@@ -75,14 +76,13 @@ if command -v ncu >/dev/null 2>&1 && ncu --version >/dev/null 2>&1; then
         --kernel-name "regex:build_ant_solution" \
         --force-overwrite \
         --export profiles/${TAG}_build \
-        ./mmas ${ARGS} --iter=5
+        ./mmas ${COMMON_ARGS} --iter=${NCU_ITER}
     # 產出：profiles/${TAG}_build.ncu-rep
 else
     echo "[$(date)] WARNING: ncu (Nsight Compute) 不可用，略過 kernel 細部分析。"
-    echo "  cuda/12.3 只附帶 ncu wrapper、未裝本體。請執行下列指令找獨立 module："
-    echo "    module spider nsight-compute"
-    echo "    module avail 2>&1 | grep -i nsight"
-    echo "  找到後在腳本上方 module load 區塊加入，再重跑即可。nsys 報告不受影響。"
+    echo "  目前的 cuda module 只有 ncu wrapper、未裝本體。確認已 module load cuda/12.8"
+    echo "  （內建 ncu），或 module spider nsight-compute 找獨立 module 後重跑。"
+    echo "  nsys 報告不受影響。"
 fi
 
 # 如需量測 2-opt local search，把上面 --kernel-name 換成 "regex:two_opt_nn"。
