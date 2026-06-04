@@ -1941,6 +1941,23 @@ void deposit_pheromone(
 }
 
 
+/**
+Fills a device array with a constant value using a grid-stride loop. Used to
+initialize the n*n pheromone matrix directly on the GPU, avoiding a large host
+staging vector (29.5 GB for pla85900) that the device_vector(size, value)
+constructor would otherwise allocate and copy. The count is size_t so it works
+for arrays larger than 2^32 elements.
+*/
+__global__
+void fill_float_array(float *data, size_t count, float value) {
+    for (size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+         i < count;
+         i += static_cast<size_t>(gridDim.x) * blockDim.x) {
+        data[i] = value;
+    }
+}
+
+
 std::vector<float> create_heuristic_matrix(const ProblemInstance &instance,
                                            MMASParameters params) {
     const auto dim = instance.dimension_;
@@ -2369,8 +2386,21 @@ json run_gpu_based_mmas(ProblemInstance &instance,
     cerr << "[DBG] trail_limits done, starting cudaMalloc" << endl;
     device_vector<TrailLimits> d_trail_limits(1, trail_limits);
 
-    device_vector<float> d_pheromone(static_cast<size_t>(dimension) * dimension,
-                                     trail_limits.max_);
+    // Allocate the n*n pheromone matrix uninitialized and fill it on the device,
+    // so we never stage a 29.5 GB host vector (as device_vector(size, value)
+    // would). Initial value is the MMAS max trail limit.
+    const size_t pheromone_count = static_cast<size_t>(dimension) * dimension;
+    device_vector<float> d_pheromone(pheromone_count);
+    {
+        const int fill_threads = 256;
+        const size_t threads_wanted =
+            (pheromone_count + fill_threads - 1) / fill_threads;
+        const int fill_blocks =
+            static_cast<int>(std::min<size_t>(threads_wanted, 65535));
+        fill_float_array<<<fill_blocks, fill_threads>>>(
+            d_pheromone.data(), pheromone_count, trail_limits.max_);
+        CUDA_CHECK(cudaGetLastError());
+    }
 
     // For coordinate-based instances we recompute distance and heuristic values
     // on the GPU from the node coordinates (see InstanceContext::get_distance /
