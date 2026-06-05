@@ -3,6 +3,10 @@
 > 目標:讓 `pla85900.tsp`（n = 85900，CEIL_2D）在 32 GiB Tesla V100 上跑得起來。
 > 環境:Taiwania 2 叢集 / V100-SXM2-32GB / sm_70 / CUDA 12.3 / GCC 10.2.1。
 > 本機是 Windows 無 GPU,無法編譯與執行;所有驗證一律 `sbatch run.slurm` 在叢集上做。
+>
+> **維護慣例**:本檔是 pla85900 修復 + 後續效能優化的單一事實來源。
+> 每當對相關程式碼(記憶體配置、即時計算路徑、build kernel 等)有改動,
+> **務必同步更新本檔**對應章節與程式片段,勿留過時程式碼。
 
 ---
 
@@ -105,6 +109,8 @@ struct InstanceContext {
         assert(from < dimension_ && to < dimension_);
         if (heuristic_matrix_ != nullptr)
             return heuristic_matrix_[static_cast<size_t>(from) * dimension_ + to];
+        // ⚠ 已於「效能優化① — 砍 FP64 pow」改寫:整數 β 用 float 連乘、
+        //   非整數退 __powf,移除 FP64 pow。完整版見下方該章節。
         const double dist = get_distance(from, to);
         return dist > 0
              ? (float)(1.0 / pow(dist, (double)heuristic_weight_)) : 1.0f;
@@ -212,6 +218,66 @@ device_vector<float> d_pheromone(pheromone_count);   // 未初始化
 blocks 取 `min(需要的 thread 數 / 256, 65535)`,靠 grid-stride loop 覆蓋全部 7.38×10⁹ 元素。
 填值在迴圈前、default stream 上依序執行,迭代 kernel 用到時已填好。
 (stagnation reset 走的是另一支 `evaporate_pheromone(reset=true)`,不受影響。)
+
+---
+
+## 效能優化① — 砍 FP64 pow(方向 1,2026-06-05)
+
+> OOM 解決後的第一個效能瓶頸。屬於「修法②(座標即時計算)」用記憶體換計算的後續帳單。
+
+### 剖析證據(`sbatch profile.slurm`,pla85900)
+
+nsys 顯示 `build_ant_solution_using_cand_lists` 佔 **~97% GPU 時間**,其餘 kernel(evaporate 2.8% 等)受 Amdahl 限制不值得碰。ncu Speed-Of-Light 對該 kernel 實測:
+
+| 指標 | 數值 | 判讀 |
+| --- | --- | --- |
+| Compute (SM) 吞吐 | 6.6% | 算術單元閒置 |
+| Memory / DRAM 吞吐 | 1.1% / 0.95% | **非 memory bound** |
+| Achieved Occupancy | 1.95%(理論 12.5%) | warp 嚴重不足 |
+| Grid / Block | (100,1,1) / (32,1,1) | 全 GPU 僅 100 warps |
+| FP64 指令數 / launch | **~28e9**(FP32 僅 0.34e9) | FP64 是主要的功 |
+| Roofline | ~3% FP64 峰值(V100 FP64 = FP32 的 ½) | — |
+
+→ 判定 **latency bound**:warp 太少無法掩蓋高延遲指令,而那些長延遲指令正是
+座標即時計算的 **FP64 `sqrt`/`pow`**。`pow` 主要來自 fallback 路徑(候選清單近鄰用盡時
+掃整個 unvisited list,每個都呼叫 `get_heuristic`),且預設 β=2 卻在跑 `pow(dist, 2.0)`。
+
+### 改法
+
+對**整數 β** 改用 float 連乘取代 `pow`,非整數才退回單精度 `__powf`。
+距離仍走 `get_distance`(double `sqrt`)以保 tour cost 與 TSPLIB 取整一致 ——
+heuristic 只是選點權重,float 足夠。刻意**不**開全域 `--use_fast_math`,避免波及
+pheromone / 距離精度,改用外科手術式的 `__powf`。
+
+**device 端 `get_heuristic`(`src/mmas.cu:773`)**
+```cpp
+const float dist = static_cast<float>(get_distance(from, to));
+if (dist <= 0.0f) return 1.0f;
+const int int_beta = static_cast<int>(heuristic_weight_);
+if (static_cast<float>(int_beta) == heuristic_weight_ && int_beta >= 0) {
+    float denom = 1.0f;
+    for (int b = 0; b < int_beta; ++b) denom *= dist;   // dist^β,無 pow
+    return 1.0f / denom;
+}
+return __powf(dist, -heuristic_weight_);                  // 非整數 β:單精度
+```
+
+**host 端 `create_heuristic_matrix`(`src/mmas.cu:1961`)** — 鏡像同樣的整數 β 特化,
+讓「有矩陣/無矩陣」「`_cl`/非 `_cl`」兩條路徑權重一致(僅小實例會用到矩陣)。
+
+### 影響範圍
+
+`get_heuristic` 被 fallback 熱路徑(`src/mmas.cu:1446`)與 cand-list cache 更新
+(`src/mmas.cu:849`)呼叫,兩處都受惠。tour cost / 路徑長度路徑不變(仍 double)。
+
+### 待驗證(`sbatch profile.slurm` 後比對 `profiles/*_build_bound.txt`)
+
+- 預期 FP64 指令數大降、Compute 吞吐下降、Duration 縮短。
+- 若瓶頸轉到 double `sqrt`:再加 heuristic 專用的 float 距離(cost 路徑維持 double)。
+- 若 Duration 改善有限、occupancy 仍 ~2%:確認是「warp 太少」的結構問題 →
+  進入**方向 2**(每 ant 多 warp / 一 block 多 ant / 提高 ant 數);
+  注意單純降 shared memory 無效(block 總數 100 已 < SM 容量)。
+- 跳過方向 3:uncoalesced 雖 44% 但 memory 吞吐才 1%,非瓶頸。
 
 ---
 
