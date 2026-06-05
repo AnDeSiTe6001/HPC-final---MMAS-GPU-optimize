@@ -13,9 +13,9 @@
 # ─────────────────────────────────────────────────────────────
 # 產生 Nsight Systems (.nsys-rep) 與 Nsight Compute (.ncu-rep) 報告
 #
-# 注意：pla85900 目前會 OOM（見 PARAMETERS.md / OOM 分析），無法 profiling。
-# 因此預設用「放得下 32GB V100 的最大實例」pla33810 來看 kernel 行為與
-# 記憶體/時間瓶頸的 scaling。等 OOM 修好後，把 INSTANCE 改成 pla85900 再跑一次。
+# pla85900 的 OOM 已修好（見 docs/OOM_FIX_pla85900.md），現直接 profiling 它。
+# COMMON_ARGS 帶 --ants=0 以啟用「自動填滿 GPU」的 ant 數（方向 2），用來量測
+# occupancy 是否從 ~1.95% 提升；若要對照舊行為，把 --ants=0 拿掉即用預設 100。
 # ─────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -33,10 +33,11 @@ make clean
 make -j4 || { echo "Build failed."; exit 1; }
 
 # ── profiling 目標 ────────────────────────────────────────────
-INSTANCE=ALL_tsp/pla85900.tsp     # 改成 pla85900 需先修 OOM
+INSTANCE=ALL_tsp/pla85900.tsp
 ALG=mmas_rwm_bt_cl                  # 與預設一致；_cl 需 block-warps*32 == cand-list-size
 # --iter 不放共用 ARGS：docopt 不接受重複 flag，nsys/ncu 各自帶一次自己的 iter 數。
-COMMON_ARGS="--instance=${INSTANCE} --alg=${ALG} --trials=1 --seed=42"
+# --ants=0：自動填滿 GPU 的 ant 數（方向 2）。stderr 會印 "auto-sized to fill GPU"。
+COMMON_ARGS="--instance=${INSTANCE} --alg=${ALG} --trials=1 --seed=42 --ants=0"
 NSYS_ITER=50      # nsys 輕量，可跑完整 iters 看時間軸
 NCU_ITER=5        # ncu 每 kernel replay 多次很慢，iter 設很小
 TAG="${ALG}_$(basename ${INSTANCE} .tsp)"

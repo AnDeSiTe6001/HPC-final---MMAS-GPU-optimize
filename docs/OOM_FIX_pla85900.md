@@ -307,6 +307,46 @@ eligible warps 0.12、0.2 wave),但主因從「FP64 compute 延遲」變成兩�
 
 ---
 
+## 效能優化② — 增加在飛行的 warp 數(方向 2,2026-06-05)
+
+> 方向 1 把 compute 砍瘦後,瓶頸剩 occupancy 1.95% 太低(latency bound)。
+
+### 根因鏈
+
+- **warp 數 = ant 數**:`blocks_count = params.ants_count_`(`src/mmas.cu:2493`、`2930`),
+  一隻 ant = 一個 block。pla85900 為避免 per-ant buffer 爆記憶體只用 `--ants=100`
+  → 全 GPU 僅 100 warps,分散在 80 SM,occupancy 1.95%(理論天花板 12.5%,受 shared mem 限)。
+- **ant 數被記憶體綁死**:每隻 ant 約佔 `ant_routes`(n×4)等;LS 開時再加
+  `pos_in_routes`(n×4)+`dont_look_bits`(n×1)。
+- **發現一個死碼**:`d_temp_ant_routes`(ants×n×4)配置後**從未被使用**。
+
+### 改法(`--ants=0` 自動填滿 GPU + gate LS buffer)
+
+1. **刪除死碼 `d_temp_ant_routes`**(`src/mmas.cu:~2491`)。
+2. **gate LS 專用 buffer**:`d_pos_in_routes` / `d_dont_look_bits` 只在
+   `use_local_search` 時配置,否則 size 0(`src/mmas.cu:~2488`)。LS 關閉時每隻 ant
+   省 n×5 B,騰出記憶體塞更多 ant。
+3. **`--ants=0` ⇒ 自動填滿 GPU**:新增 `compute_auto_ant_count()`
+   (`src/mmas.cu:~2902`),取
+   `min(占用率目標, 記憶體預算, n)`:
+   - 占用率目標 = `SM 數 × 16 warps ÷ block-warps`(超額認購讓 scheduler 不挨餓);
+   - 記憶體預算 = `cudaMemGetInfo 的 free − 固定配置(主要 n×n 費洛蒙)− 1 GiB 安全邊際`,
+     再除以每隻 ant 的位元組數。
+   - **預設仍為 100,不影響既有 benchmark**;`--ants=0` 才啟用(取代原本會 OOM 的
+     「0 ⇒ dimension」語意)。`main.cc` 的 USAGE 已更新。
+
+pla85900 預估:占用率目標 80×16=**1280 隻 ant**(記憶體可塞 >10000,n 也夠),
+occupancy 應從 1.95% → 接近 12.5%(~6× warps)。
+
+### 待驗證(`sbatch profile.slurm`,但需在參數加 `--ants=0`)
+
+- 量 occupancy 是否從 1.95% 升到 ~12.5%、build kernel 每代時間 / 總 throughput。
+- 注意:ant 數變多會**改變 MMAS 每代行為**(這是預期、且只在 `--ants=0` 時發生)。
+- 若想突破 12.5% 天花板:把 `--alg` 的 `bt`(BitmaskTabu)換成 `ct`(CompactTabu,
+  shared mem 減半 → 天花板 ~25%),需更多 ant(仍塞得下)。
+
+---
+
 ## 結果與記憶體估算
 
 pla85900 在預設 `mmas_rwm_bt_cl` + `--ants=100` 下,GPU 端只剩:

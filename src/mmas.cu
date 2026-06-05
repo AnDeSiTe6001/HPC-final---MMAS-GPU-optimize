@@ -2482,13 +2482,17 @@ json run_gpu_based_mmas(ProblemInstance &instance,
         }
     }
     device_vector<uint32_t> d_cand_lists(cand_lists);
-    device_vector<uint32_t> d_ant_routes(params.ants_count_ * dimension);
+    const size_t ant_buffer_elems =
+        static_cast<size_t>(params.ants_count_) * dimension;
+    device_vector<uint32_t> d_ant_routes(ant_buffer_elems);
     device_vector<float>    d_route_costs(params.ants_count_,
                                           numeric_limits<float>::max());
-    device_vector<int32_t> d_pos_in_routes(params.ants_count_ * dimension);
-    device_vector<int8_t> d_dont_look_bits(params.ants_count_ * dimension);
-    
-    device_vector<uint32_t> d_temp_ant_routes(params.ants_count_ * dimension);
+    // pos_in_routes and dont_look_bits are only read/written by the 2-opt
+    // local search (two_opt_nn). When LS is off they are never touched, so
+    // allocate nothing -- this frees ants*n*(4+1) bytes, which on large
+    // instances lets a much larger (auto-sized) ant count fit in memory.
+    device_vector<int32_t> d_pos_in_routes(use_local_search ? ant_buffer_elems : 0);
+    device_vector<int8_t>  d_dont_look_bits(use_local_search ? ant_buffer_elems : 0);
 
     const auto blocks_count = params.ants_count_;
     const uint32_t threads_per_block = warps_per_block * WARP_SIZE;
@@ -2900,6 +2904,73 @@ bool make_path(const std::string& path) {
 
 
 /**
+Picks an ant count that fills the GPU, used when --ants=0 is requested.
+
+One ant maps to one solution-build thread block, so the ant count *is* the
+number of blocks and therefore directly bounds how many warps are in flight.
+The historical "0 => dimension" rule OOMs on large instances (the per-ant
+buffers grow with ants*n), while a small hand-picked value leaves the GPU
+starved -- pla85900 with 100 ants measured ~1.95% achieved occupancy. Instead
+we size the ant count to saturate the SMs, capped by the free device memory
+left after the fixed allocations (dominated by the n*n pheromone matrix) and by
+the node count. Called before any device_vector is allocated, so cudaMemGetInfo
+reports (total - CUDA context); we subtract the upcoming fixed allocations
+ourselves and keep a safety margin for fragmentation.
+*/
+static uint32_t compute_auto_ant_count(
+        const ProblemInstance &instance,
+        std::map<std::string, docopt::value> &args) {
+
+    const size_t n = instance.dimension_;
+    const uint32_t cand_list_size = args["--cand-list-size"].asLong();
+    const uint32_t warps_per_block =
+        std::max<long>(1, args["--block-warps"].asLong());
+    const bool use_ls = args["--ls"].asLong() == 1;
+    const bool coord_based = (instance.edge_weight_type_ != EXPLICIT)
+                             && !instance.coordinates_.empty();
+
+    // Occupancy target: oversubscribe the SMs (> the shared-memory residency
+    // ceiling) so the schedulers stay fed and the tail stays balanced; the
+    // hardware caps the actually-resident blocks.
+    int device = 0;
+    CUDA_CHECK(cudaGetDevice(&device));
+    cudaDeviceProp prop;
+    CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+    const size_t target_warps_per_sm = 16;
+    const size_t occupancy_ants =
+        static_cast<size_t>(prop.multiProcessorCount) * target_warps_per_sm
+        / warps_per_block;
+
+    // Memory budget. Mirror the fixed allocations made in run_gpu_based_mmas.
+    size_t free_bytes = 0, total_bytes = 0;
+    CUDA_CHECK(cudaMemGetInfo(&free_bytes, &total_bytes));
+    size_t fixed = n * n * sizeof(float);                  // d_pheromone
+    if (!coord_based) {
+        fixed += 2 * n * n * sizeof(float);                // d_heuristic + d_dist_matrix
+    } else {
+        fixed += 2 * n * sizeof(double);                   // d_coordinates
+    }
+    fixed += 2 * n * cand_list_size * sizeof(uint32_t);    // cand lists + product cache
+    fixed += 3 * n * sizeof(uint32_t);                     // iter/global/reset best routes
+
+    size_t per_ant = n * sizeof(uint32_t)                  // d_ant_routes
+                   + sizeof(float)                         // d_route_costs
+                   + warps_per_block * WARP_SIZE * sizeof(rand_state_t);  // d_rng_states
+    if (use_ls) {                                          // 2-opt-only buffers
+        per_ant += n * (sizeof(int32_t) + sizeof(int8_t)); // pos_in_routes + dont_look_bits
+    }
+
+    const size_t safety = size_t{1} << 30;                 // 1 GiB headroom
+    const size_t budget =
+        (free_bytes > fixed + safety) ? free_bytes - fixed - safety : 0;
+    const size_t mem_ants = per_ant ? budget / per_ant : 0;
+
+    size_t ants = std::min({occupancy_ants, mem_ants, n});
+    return static_cast<uint32_t>(ants < 1 ? 1 : ants);
+}
+
+
+/**
  * Runs the MMAS based on the command line arguments passed in args
  */
 void run_mmas_experiment(std::map<std::string, docopt::value> &args) {
@@ -2919,8 +2990,16 @@ void run_mmas_experiment(std::map<std::string, docopt::value> &args) {
     cerr << "[DBG] instance loaded, dim=" << instance.dimension_ << endl;
 
     const auto dimension = instance.dimension_;
-    const auto ants_count = args["--ants"].asLong() ? args["--ants"].asLong()
-                                                    : dimension;
+    // --ants=0 means "auto-size to fill the GPU" (see compute_auto_ant_count);
+    // any positive value is taken verbatim. Default is 100 (see USAGE), so
+    // existing runs/benchmarks are unaffected unless they opt in with --ants=0.
+    const long ants_arg = args["--ants"].asLong();
+    const uint32_t ants_count = (ants_arg > 0)
+        ? static_cast<uint32_t>(ants_arg)
+        : compute_auto_ant_count(instance, args);
+    cerr << "[DBG] ants_count = " << ants_count
+         << (ants_arg > 0 ? " (from --ants)" : " (auto-sized to fill GPU)")
+         << endl;
 
     MMASParameters params;
     params.ants_count_ = ants_count;
