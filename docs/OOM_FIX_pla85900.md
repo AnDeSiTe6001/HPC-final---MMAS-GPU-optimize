@@ -338,12 +338,30 @@ eligible warps 0.12、0.2 wave),但主因從「FP64 compute 延遲」變成兩�
 pla85900 預估:占用率目標 80×16=**1280 隻 ant**(記憶體可塞 >10000,n 也夠),
 occupancy 應從 1.95% → 接近 12.5%(~6× warps)。
 
-### 待驗證(`sbatch profile.slurm`,但需在參數加 `--ants=0`)
+### 實測結果(`sbatch profile.slurm --ants=0`,pla85900,2026-06-06)
 
-- 量 occupancy 是否從 1.95% 升到 ~12.5%、build kernel 每代時間 / 總 throughput。
-- 注意:ant 數變多會**改變 MMAS 每代行為**(這是預期、且只在 `--ants=0` 時發生)。
-- 若想突破 12.5% 天花板:把 `--alg` 的 `bt`(BitmaskTabu)換成 `ct`(CompactTabu,
-  shared mem 減半 → 天花板 ~25%),需更多 ant(仍塞得下)。
+auto 選了 **1280 ant**(grid 1280)。**關鍵:ncu Duration 是「一次 launch = 全部 ant」**,
+ant 數 ×12.8,所以要看 per-ant throughput,不是 launch 時間:
+
+| 指標 | dir 1(100 ant) | dir 2(1280 ant) | 變化 |
+| --- | --- | --- | --- |
+| Duration / launch | 2.57 s | 5.95 s | ↑ 2.3× |
+| **時間 / ant** | 25.7 ms | **4.65 ms** | **↓ 5.5×** |
+| Achieved occupancy | 1.95% | **12.3%** | ↑ 6.3×(≈ 天花板 12.5%) |
+| SM 吞吐 | 3.4% | 19.2% | ↑ |
+| FP64 指令 / launch | 3.38e9 | 43.4e9 | ↑ 12.8×(= ant 比,per-ant 不變) |
+
+→ **方向 2 有效**:per-ant 快 5.5×、occupancy 逼近 shared-mem 天花板。Duration 變長
+只是每代多建 12.8× 的 tour。**別把 ncu Duration 當絕對時間**(replay/鎖頻會灌水);
+端到端請看程式 stdout 的 `Build sol. kernel mean time` / `Elapsed` / final gap%。
+
+### 後續
+
+- 1280 是 2× 超額認購;occupancy 天花板只需 ~640 ant(8 warp/SM × 80)。要「每代減半、
+  throughput 不變」可把 `compute_auto_ant_count` 的 `target_warps_per_sm` 16 → 8。
+- 突破 12.5% 天花板:`bt`(BitmaskTabu)→ `ct`(CompactTabu,shared mem 減半 → ~25%)。
+- 剩餘 stall:L1TEX 記憶體 scoreboard 40% + fixed-latency(double sqrt)32%
+  → 對應方向 1b(heuristic 改 float sqrtf)與 gather 的合併存取改善。
 
 ---
 
