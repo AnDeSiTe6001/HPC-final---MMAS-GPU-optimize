@@ -33,7 +33,7 @@ make clean
 make -j4 || { echo "Build failed."; exit 1; }
 
 # ── profiling 目標 ────────────────────────────────────────────
-INSTANCE=ALL_tsp/pla33810.tsp     # 改成 pla85900 需先修 OOM
+INSTANCE=ALL_tsp/pla85900.tsp     # 改成 pla85900 需先修 OOM
 ALG=mmas_rwm_bt_cl                  # 與預設一致；_cl 需 block-warps*32 == cand-list-size
 # --iter 不放共用 ARGS：docopt 不接受重複 flag，nsys/ncu 各自帶一次自己的 iter 數。
 COMMON_ARGS="--instance=${INSTANCE} --alg=${ALG} --trials=1 --seed=42"
