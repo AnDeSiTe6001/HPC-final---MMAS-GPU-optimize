@@ -78,6 +78,52 @@ if command -v ncu >/dev/null 2>&1 && ncu --version >/dev/null 2>&1; then
         --export profiles/${TAG}_build \
         ./mmas ${COMMON_ARGS} --iter=${NCU_ITER}
     # 產出：profiles/${TAG}_build.ncu-rep
+
+    # ── 2b) compute / memory bound 判讀 ───────────────────────────
+    #   ncu --import 只讀剛產生的報告、不需要 GPU。抽出 Speed-Of-Light 的
+    #   SM(compute) / Memory 吞吐百分比，以及 achieved occupancy，存成易讀的
+    #   摘要並印出一句結論。判讀規則：
+    #     SM 高、Memory 低                 → compute bound
+    #     Memory 高、SM 低                 → memory bound
+    #     兩者都低（且 occupancy 也低）     → latency / occupancy bound
+    REP="profiles/${TAG}_build.ncu-rep"
+    BOUND="profiles/${TAG}_build_bound.txt"
+    echo "[$(date)] 判讀 compute / memory bound..."
+    {
+        echo "# Speed-Of-Light 摘要：$REP"
+        echo "# 取第一個 build kernel launch 的數值"
+        echo
+        ncu --import "$REP" --page details \
+            | grep -E "Compute \(SM\) Throughput|Memory Throughput|Achieved Occupancy|DRAM Throughput|Duration" \
+            | head -n 20
+    } > "$BOUND" 2>&1 || echo "（details 解析失敗，改看下方 CSV）" >> "$BOUND"
+
+    # 機器可讀的 CSV（值穩定、好後續比較）
+    ncu --import "$REP" --csv --metrics \
+sm__throughput.avg.pct_of_peak_sustained_elapsed,\
+gpu__compute_memory_throughput.avg.pct_of_peak_sustained_elapsed,\
+sm__warps_active.avg.pct_of_peak_sustained_active \
+        >> "$BOUND" 2>&1 || true
+
+    # 用兩個吞吐百分比 + occupancy 給一句白話結論（取第一個 kernel 的數列）
+    awk -F',' '
+        function num(s){ gsub(/[" %]/,"",s); return s+0 }
+        /sm__throughput\.avg\.pct_of_peak_sustained_elapsed/ { next }  # header
+        NF>=3 && $0 ~ /[0-9]/ {
+            # 嘗試抓最後三個數值欄（不同 ncu 版本欄序略有差異）
+            sm=num($(NF-2)); mem=num($(NF-1)); occ=num($NF);
+            if (sm==0 && mem==0) next;
+            print "";
+            printf "SM(compute) 吞吐: %.1f%%   Memory 吞吐: %.1f%%   Achieved occupancy: %.1f%%\n", sm, mem, occ;
+            if (sm>=60 && sm>mem)        verdict="COMPUTE bound：瓶頸在算術，優先看 fallback 的即時 pow()/sqrt()。";
+            else if (mem>=60 && mem>sm)  verdict="MEMORY bound：瓶頸在記憶體吞吐，試 const __restrict__ / __ldg、對齊 gather。";
+            else if (occ<50)             verdict="LATENCY / OCCUPANCY bound：SM 多在閒置，瓶頸是相依的 n 步迴圈 + 單 warp/block，需從演算法平行度下手。";
+            else                         verdict="混合：SM 與 Memory 都未吃滿，先補 occupancy 再看次要瓶頸。";
+            print "結論 → " verdict;
+            exit;
+        }
+    ' "$BOUND" | tee -a "$BOUND"
+    echo "[$(date)] 判讀結果：$BOUND"
 else
     echo "[$(date)] WARNING: ncu (Nsight Compute) 不可用，略過 kernel 細部分析。"
     echo "  目前的 cuda module 只有 ncu wrapper、未裝本體。確認已 module load cuda/12.8"
