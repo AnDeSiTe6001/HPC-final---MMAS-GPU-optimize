@@ -2936,7 +2936,11 @@ static uint32_t compute_auto_ant_count(
     CUDA_CHECK(cudaGetDevice(&device));
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
-    const size_t target_warps_per_sm = 16;
+    // 8 warps/SM matches the shared-memory occupancy ceiling for BitmaskTabu on
+    // pla85900 (theoretical 12.5% = 2 warps/scheduler x 4 schedulers). That is
+    // enough to saturate occupancy without 2x oversubscribing memory and
+    // doubling the per-launch duration; the hardware queues any extra blocks.
+    const size_t target_warps_per_sm = 8;
     const size_t occupancy_ants =
         static_cast<size_t>(prop.multiProcessorCount) * target_warps_per_sm
         / warps_per_block;

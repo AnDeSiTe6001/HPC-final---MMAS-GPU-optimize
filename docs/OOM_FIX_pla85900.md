@@ -329,16 +329,24 @@ eligible warps 0.12、0.2 wave),但主因從「FP64 compute 延遲」變成兩�
 3. **`--ants=0` ⇒ 自動填滿 GPU**:新增 `compute_auto_ant_count()`
    (`src/mmas.cu:~2902`),取
    `min(占用率目標, 記憶體預算, n)`:
-   - 占用率目標 = `SM 數 × 16 warps ÷ block-warps`(超額認購讓 scheduler 不挨餓);
+   - 占用率目標 = `SM 數 × 8 warps ÷ block-warps`(8 warp/SM = BitmaskTabu 的
+     shared-mem occupancy 天花板,剛好填滿、不超額認購);
    - 記憶體預算 = `cudaMemGetInfo 的 free − 固定配置(主要 n×n 費洛蒙)− 1 GiB 安全邊際`,
      再除以每隻 ant 的位元組數。
    - **預設仍為 100,不影響既有 benchmark**;`--ants=0` 才啟用(取代原本會 OOM 的
      「0 ⇒ dimension」語意)。`main.cc` 的 USAGE 已更新。
 
-pla85900 預估:占用率目標 80×16=**1280 隻 ant**(記憶體可塞 >10000,n 也夠),
-occupancy 應從 1.95% → 接近 12.5%(~6× warps)。
+pla85900 預估:占用率目標 80×8=**640 隻 ant**(記憶體可塞 >10000,n 也夠),
+occupancy → 接近天花板 12.5%。
+
+> 沿革:`target_warps_per_sm` 初版為 16(→1280 ant),下方實測證實 1280 是 2× 超額認購
+> (occupancy 已達天花板,多的只排隊),故 2026-06-06 調為 8(→640 ant):同樣的
+> per-ant throughput 與 occupancy,但每代 launch 時間約減半。
 
 ### 實測結果(`sbatch profile.slurm --ants=0`,pla85900,2026-06-06)
+
+> 此次量測時 `target_warps_per_sm` 仍為 16,故 auto 選了 1280 ant;之後已調為 8
+> (→640 ant),per-ant 數字不變、launch 時間約減半。下表保留 1280 的歷史數據。
 
 auto 選了 **1280 ant**(grid 1280)。**關鍵:ncu Duration 是「一次 launch = 全部 ant」**,
 ant 數 ×12.8,所以要看 per-ant throughput,不是 launch 時間:
@@ -357,8 +365,8 @@ ant 數 ×12.8,所以要看 per-ant throughput,不是 launch 時間:
 
 ### 後續
 
-- 1280 是 2× 超額認購;occupancy 天花板只需 ~640 ant(8 warp/SM × 80)。要「每代減半、
-  throughput 不變」可把 `compute_auto_ant_count` 的 `target_warps_per_sm` 16 → 8。
+- ✅ 已做(2026-06-06):`target_warps_per_sm` 16 → 8 → auto 改選 ~640 ant
+  (occupancy 天花板 8 warp/SM × 80),每代 launch 約減半、per-ant throughput 不變。
 - 突破 12.5% 天花板:`bt`(BitmaskTabu)→ `ct`(CompactTabu,shared mem 減半 → ~25%)。
 - 剩餘 stall:L1TEX 記憶體 scoreboard 40% + fixed-latency(double sqrt)32%
   → 對應方向 1b(heuristic 改 float sqrtf)與 gather 的合併存取改善。
