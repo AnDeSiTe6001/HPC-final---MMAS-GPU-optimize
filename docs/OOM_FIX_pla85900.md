@@ -270,14 +270,40 @@ return __powf(dist, -heuristic_weight_);                  // 非整數 β:單精
 `get_heuristic` 被 fallback 熱路徑(`src/mmas.cu:1446`)與 cand-list cache 更新
 (`src/mmas.cu:849`)呼叫,兩處都受惠。tour cost / 路徑長度路徑不變(仍 double)。
 
-### 待驗證(`sbatch profile.slurm` 後比對 `profiles/*_build_bound.txt`)
+### 實測結果(`sbatch profile.slurm`,pla85900 build kernel,2026-06-05)
 
-- 預期 FP64 指令數大降、Compute 吞吐下降、Duration 縮短。
-- 若瓶頸轉到 double `sqrt`:再加 heuristic 專用的 float 距離(cost 路徑維持 double)。
-- 若 Duration 改善有限、occupancy 仍 ~2%:確認是「warp 太少」的結構問題 →
-  進入**方向 2**(每 ant 多 warp / 一 block 多 ant / 提高 ant 數);
-  注意單純降 shared memory 無效(block 總數 100 已 < SM 容量)。
-- 跳過方向 3:uncoalesced 雖 44% 但 memory 吞吐才 1%,非瓶頸。
+對照舊(FP64 pow)vs 新(方向 1):
+
+| 指標 | 舊 (pow/FP64) | 新 (方向 1) | 變化 |
+| --- | --- | --- | --- |
+| Duration / launch | ~4.04 s | **~2.57 s** | **↓ ~36%** |
+| FP64 指令數 / launch | ~28.0e9 | **~3.38e9** | **↓ ~88%** |
+| FP32 指令數 / launch | ~0.34e9 | ~2.03e9 | ↑(pow → float 乘法) |
+| Compute (SM) 吞吐 | 6.6% | 3.4% | ↓ |
+| fixed-latency 依賴 stall | ~50% | ~37% | ↓ |
+
+→ **方向 1 有效**:`pow` 砍掉後 FP64 降 ~88%,單顆 build kernel 快約 1/3。
+
+### 瓶頸位移(下一步依據)
+
+新報告 stall 結構改變,整體**仍是 latency / occupancy bound**(occupancy 1.95%、
+eligible warps 0.12、0.2 wave),但主因從「FP64 compute 延遲」變成兩者並列:
+
+- **fixed-latency execution dependency 37%** — 剩下的 double `sqrt` + 算術依賴鏈。
+- **scoreboard L1TEX 記憶體 stall 34%** — 分散的 `pheromone[node]` / cand gather 的全域記憶體延遲(舊報告非主角,現在浮上來)。
+
+剩下的 ~3.38e9 FP64 幾乎都是 `get_distance` 的 double `sqrt`(fallback 掃 unvisited
++ route length 都會呼叫)。後續方向:
+
+- **方向 1b(小):** 給 heuristic 一條 float `sqrtf` 距離(cost 路徑維持 double),
+  砍掉剩餘 double `sqrt`。報酬遞減但因 latency bound、串行依賴鏈仍會直接縮時。
+- **方向 2(大、治本):** compute 已不肥,memory latency(34%)+ occupancy 1.95%
+  成天花板 → 增加在飛行的 warp 數(每 ant 多 warp / 一 block 多 ant)。
+  單純降 shared memory 無效(block 總數 100 已 < SM 容量)。
+- **跳過方向 3:** uncoalesced 雖 44% 但 memory 吞吐才 1.8%,非瓶頸。
+
+> 註:`*_build_bound.txt` 底部那行 awk 一句話結論在舊版 profile.slurm 有解析 bug
+> (誤印 SM/occupancy 0.0%),已改為解析 details 區段;以表格上方 details 數字為準。
 
 ---
 
