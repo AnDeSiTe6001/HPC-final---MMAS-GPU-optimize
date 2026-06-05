@@ -367,7 +367,15 @@ ant 數 ×12.8,所以要看 per-ant throughput,不是 launch 時間:
 
 - ✅ 已做(2026-06-06):`target_warps_per_sm` 16 → 8 → auto 改選 ~640 ant
   (occupancy 天花板 8 warp/SM × 80),每代 launch 約減半、per-ant throughput 不變。
-- 突破 12.5% 天花板:`bt`(BitmaskTabu)→ `ct`(CompactTabu,shared mem 減半 → ~25%)。
+- ⚠ 更正:**不能用 `bt → ct` 突破天花板**。各 Tabu 的 shared mem/block:bt=`ceil(n/8)`
+  ≈10.7 KB(1 bit/node,最省)、ct=`2n`≈171.8 KB、lc=`4n`≈343.6 KB。CLAUDE.md 說的
+  「ct ~½ 記憶體」是相對 lc,不是相對 bt。ct 在 pla85900 需 171.8 KB > V100 每 block
+  上限 96 KB → **kernel 無法啟動**;且 shared 更大只會讓 occupancy 更差。**bt 已是
+  occupancy 最佳的 tabu,12.5% 就是此 kernel 設計的天花板。**
+- 真要突破 12.5%:把 visited bitmask 從 shared 移到 global(L2 cache)以釋放 shared →
+  更多 block/SM,但會增加全域記憶體流量(目前 L1TEX stall 已 40%),得失未定、風險高。
+- 更務實:occupancy 已到頂,改攻剩餘 stall —— 方向 1b(double `sqrt`→float `sqrtf`,
+  佔 ~32%)與 gather 的合併存取 / `__ldg`(L1TEX 記憶體 stall,佔 ~40%)。
 - 剩餘 stall:L1TEX 記憶體 scoreboard 40% + fixed-latency(double sqrt)32%
   → 對應方向 1b(heuristic 改 float sqrtf)與 gather 的合併存取改善。
 
