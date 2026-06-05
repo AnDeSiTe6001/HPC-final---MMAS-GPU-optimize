@@ -779,10 +779,27 @@ struct InstanceContext {
         if (heuristic_matrix_ != nullptr) {
             return heuristic_matrix_[static_cast<size_t>(from) * dimension_ + to];
         }
-        const double dist = get_distance(from, to);
-        return dist > 0
-             ? static_cast<float>(1.0 / pow(dist, static_cast<double>(heuristic_weight_)))
-             : 1.0f;
+        // heuristic = 1 / dist^beta. For coordinate-based instances this is
+        // recomputed on the fly for every candidate, so it must be cheap. The
+        // FP64 pow() here was the dominant cost of build_ant_solution (~28e9 FP64
+        // instr/launch on pla85900, ~3% of FP64 peak). beta is almost always a
+        // small integer (default 2), so take the float reciprocal of an integer
+        // power and fall back to the single-precision __powf only otherwise. The
+        // distance itself stays double (get_distance) because the tour cost must
+        // match the TSPLIB rounding; the heuristic is only a selection weight.
+        const float dist = static_cast<float>(get_distance(from, to));
+        if (dist <= 0.0f) {
+            return 1.0f;
+        }
+        const int int_beta = static_cast<int>(heuristic_weight_);
+        if (static_cast<float>(int_beta) == heuristic_weight_ && int_beta >= 0) {
+            float denom = 1.0f;
+            for (int b = 0; b < int_beta; ++b) {
+                denom *= dist;
+            }
+            return 1.0f / denom;
+        }
+        return __powf(dist, -heuristic_weight_);
     }
 };
 
@@ -1963,12 +1980,27 @@ std::vector<float> create_heuristic_matrix(const ProblemInstance &instance,
     const auto dim = instance.dimension_;
     std::vector<float> result(static_cast<size_t>(dim) * dim);
     result.clear();
+    // Mirror InstanceContext::get_heuristic: specialise the common integer-beta
+    // case (default 2) to a float power so the matrix path and the on-the-fly
+    // device path produce the same heuristic weights.
+    const int int_beta = static_cast<int>(params.beta_);
+    const bool beta_is_int =
+        static_cast<double>(int_beta) == params.beta_ && int_beta >= 0;
     for (auto i = 0u; i < dim; ++i) {
         for (auto j = 0u; j < dim; ++j) {
-            const auto dist = instance.get_distance(i, j);
-            const float h = dist > 0
-                        ? static_cast<float>(1 / std::pow(dist, params.beta_))
-                        : 1;
+            const float dist = static_cast<float>(instance.get_distance(i, j));
+            float h = 1.0f;
+            if (dist > 0.0f) {
+                if (beta_is_int) {
+                    float denom = 1.0f;
+                    for (int b = 0; b < int_beta; ++b) {
+                        denom *= dist;
+                    }
+                    h = 1.0f / denom;
+                } else {
+                    h = static_cast<float>(1.0 / std::pow(dist, params.beta_));
+                }
+            }
             result.push_back(h);
         }
     }
