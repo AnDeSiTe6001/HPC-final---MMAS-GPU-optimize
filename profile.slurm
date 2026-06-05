@@ -105,22 +105,24 @@ gpu__compute_memory_throughput.avg.pct_of_peak_sustained_elapsed,\
 sm__warps_active.avg.pct_of_peak_sustained_active \
         >> "$BOUND" 2>&1 || true
 
-    # 用兩個吞吐百分比 + occupancy 給一句白話結論（取第一個 kernel 的數列）
-    awk -F',' '
-        function num(s){ gsub(/[" %]/,"",s); return s+0 }
-        /sm__throughput\.avg\.pct_of_peak_sustained_elapsed/ { next }  # header
-        NF>=3 && $0 ~ /[0-9]/ {
-            # 嘗試抓最後三個數值欄（不同 ncu 版本欄序略有差異）
-            sm=num($(NF-2)); mem=num($(NF-1)); occ=num($NF);
-            if (sm==0 && mem==0) next;
+    # 用 SM / Memory 吞吐 + occupancy 給一句白話結論。
+    # 直接解析上面 details 區段的人類可讀行（每行一個 metric，空白分隔，值在 $NF）——
+    # 比解析 --csv 穩：CSV 是「一列一個 metric」的長格式，欄位數因 kernel 名稱含空白/逗號
+    # 而不固定。取每個 metric 第一次出現的值（= 第一個 kernel launch）。
+    awk '
+        function num(v){ gsub(/[^0-9.]/,"",v); return v+0 }
+        $0 ~ /Compute \(SM\) Throughput/ && sm=="" { sm=num($NF) }
+        $0 ~ /Memory Throughput/ && $(NF-1)=="%" && mem=="" { mem=num($NF) }
+        $0 ~ /Achieved Occupancy/ && occ=="" { occ=num($NF) }
+        END {
+            if (sm=="" && mem=="") { print "（無法解析 SOL 數值，請看上方 details 區段）"; exit }
             print "";
             printf "SM(compute) 吞吐: %.1f%%   Memory 吞吐: %.1f%%   Achieved occupancy: %.1f%%\n", sm, mem, occ;
             if (sm>=60 && sm>mem)        verdict="COMPUTE bound：瓶頸在算術，優先看 fallback 的即時 pow()/sqrt()。";
             else if (mem>=60 && mem>sm)  verdict="MEMORY bound：瓶頸在記憶體吞吐，試 const __restrict__ / __ldg、對齊 gather。";
-            else if (occ<50)             verdict="LATENCY / OCCUPANCY bound：SM 多在閒置，瓶頸是相依的 n 步迴圈 + 單 warp/block，需從演算法平行度下手。";
+            else if (occ<50)             verdict="LATENCY / OCCUPANCY bound：SM 多在閒置，瓶頸是相依的 n 步迴圈 + warp 太少（occupancy 低），需從演算法平行度下手。";
             else                         verdict="混合：SM 與 Memory 都未吃滿，先補 occupancy 再看次要瓶頸。";
             print "結論 → " verdict;
-            exit;
         }
     ' "$BOUND" | tee -a "$BOUND"
     echo "[$(date)] 判讀結果：$BOUND"
