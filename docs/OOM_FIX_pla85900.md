@@ -109,8 +109,8 @@ struct InstanceContext {
         assert(from < dimension_ && to < dimension_);
         if (heuristic_matrix_ != nullptr)
             return heuristic_matrix_[static_cast<size_t>(from) * dimension_ + to];
-        // ⚠ 已於「效能優化① — 砍 FP64 pow」改寫:整數 β 用 float 連乘、
-        //   非整數退 __powf,移除 FP64 pow。完整版見下方該章節。
+        // ⚠ 已於「效能優化①(砍 FP64 pow)」與「效能優化③(方向 1b:dist 改
+        //   float sqrtf)」改寫;此處為原始版,完整版見下方兩章節。
         const double dist = get_distance(from, to);
         return dist > 0
              ? (float)(1.0 / pow(dist, (double)heuristic_weight_)) : 1.0f;
@@ -378,6 +378,41 @@ ant 數 ×12.8,所以要看 per-ant throughput,不是 launch 時間:
   佔 ~32%)與 gather 的合併存取 / `__ldg`(L1TEX 記憶體 stall,佔 ~40%)。
 - 剩餘 stall:L1TEX 記憶體 scoreboard 40% + fixed-latency(double sqrt)32%
   → 對應方向 1b(heuristic 改 float sqrtf)與 gather 的合併存取改善。
+
+---
+
+## 效能優化③ — heuristic 距離改 float sqrtf(方向 1b,2026-06-06)
+
+> occupancy 已到 bt 的天花板(12.5%),改攻剩餘 stall 的另一半:double `sqrt`
+> (dir 1 之後的 fixed-latency stall ~32%)。
+
+### 根因
+
+dir 1 砍掉 FP64 pow 後,剩餘 ~3.38e9 FP64/launch(100 ant)幾乎全是 `get_distance`
+的 double `sqrt`。熱點是 **fallback 路徑**:候選清單近鄰用盡時掃整個 unvisited,
+每個都呼叫 `get_heuristic` → `get_distance`(double sqrt)。cand-list product cache
+更新(`src/mmas.cu:849`)也會呼叫。
+
+### 改法
+
+新增**只給 heuristic 用**的單精度距離 `device_node_distance_f()`(`src/mmas.cu:~736`,
+用 `sqrtf`/`ceilf`/`cosf`/`acosf`),`get_heuristic`(`src/mmas.cu:~800`)改呼叫它:
+
+```cpp
+const float dist = (coordinates_ != nullptr)
+    ? device_node_distance_f(edge_weight_type_, coordinates_, from, to)  // 1b
+    : static_cast<float>(get_distance(from, to));                        // 退路
+```
+
+- **tour cost 路徑完全不動**:route length / 2-opt 仍走 double 的 `get_distance` /
+  `device_node_distance`,成本仍對齊 TSPLIB 取整與 best-known。heuristic 只是選點權重,
+  float 足夠。
+- coords 不存在(理論上只剩 EXPLICIT,但它早從 `heuristic_matrix_` 回傳)時退回精確距離。
+
+### 待驗證(`sbatch profile.slurm --ants=0`)
+
+- 預期剩餘 FP64 大降、fixed-latency stall(~32%)縮小、build kernel per-ant 再快一些。
+- 之後 L1TEX 記憶體 stall(~40%)會更突出 → 下一步可做 gather 的合併存取 / `__ldg`。
 
 ---
 

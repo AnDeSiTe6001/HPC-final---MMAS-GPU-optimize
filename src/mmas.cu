@@ -734,6 +734,67 @@ float device_node_distance(EdgeWeightType type,
 
 
 /**
+Single-precision distance used ONLY for the heuristic weight (1/dist^beta).
+
+The heuristic is just a selection bias, so float sqrtf is accurate enough and
+much cheaper than the double sqrt in device_node_distance. After dir 1 removed
+the FP64 pow, the dominant remaining FP64 cost in build_ant_solution was this
+sqrt -- the fallback path calls get_heuristic for every unvisited node. The
+tour-cost path (route length, 2-opt) keeps using the exact double
+device_node_distance so the reported cost still matches the TSPLIB rounding.
+*/
+__device__ inline
+float device_node_distance_f(EdgeWeightType type,
+                             const double *coords,
+                             uint32_t from,
+                             uint32_t to) {
+    const float x1 = static_cast<float>(coords[2 * from]);
+    const float y1 = static_cast<float>(coords[2 * from + 1]);
+    const float x2 = static_cast<float>(coords[2 * to]);
+    const float y2 = static_cast<float>(coords[2 * to + 1]);
+
+    switch (type) {
+        case EUC_2D: {
+            const float dx = x2 - x1, dy = y2 - y1;
+            return static_cast<float>(
+                static_cast<int32_t>(sqrtf(dx * dx + dy * dy) + 0.5f));
+        }
+        case CEIL_2D: {
+            const float dx = x2 - x1, dy = y2 - y1;
+            return static_cast<float>(
+                static_cast<int32_t>(ceilf(sqrtf(dx * dx + dy * dy))));
+        }
+        case ATT: {
+            const float xd = x1 - x2, yd = y1 - y2;
+            const float rij = sqrtf((xd * xd + yd * yd) / 10.0f);
+            const int32_t tij = static_cast<int32_t>(rij);
+            return static_cast<float>(tij < rij ? tij + 1 : tij);
+        }
+        case GEO: {
+            const float kPi = 3.14159265358979f;
+            float deg, mn;
+            deg = static_cast<int32_t>(x1); mn = x1 - deg;
+            const float lati = kPi * (deg + 5.0f * mn / 3.0f) / 180.0f;
+            deg = static_cast<int32_t>(x2); mn = x2 - deg;
+            const float latj = kPi * (deg + 5.0f * mn / 3.0f) / 180.0f;
+            deg = static_cast<int32_t>(y1); mn = y1 - deg;
+            const float longi = kPi * (deg + 5.0f * mn / 3.0f) / 180.0f;
+            deg = static_cast<int32_t>(y2); mn = y2 - deg;
+            const float longj = kPi * (deg + 5.0f * mn / 3.0f) / 180.0f;
+            const float q1 = cosf(longi - longj);
+            const float q2 = cosf(lati - latj);
+            const float q3 = cosf(lati + latj);
+            return static_cast<float>(static_cast<int32_t>(
+                6378.388f * acosf(0.5f * ((1.0f + q1) * q2 - (1.0f - q1) * q3))
+                + 1.0f));
+        }
+        default:
+            return 0.0f;  // EXPLICIT: handled via heuristic_matrix_
+    }
+}
+
+
+/**
 Gathers problem instance-related data to lower number of parameters
 passed to kernels.
 
@@ -780,14 +841,20 @@ struct InstanceContext {
             return heuristic_matrix_[static_cast<size_t>(from) * dimension_ + to];
         }
         // heuristic = 1 / dist^beta. For coordinate-based instances this is
-        // recomputed on the fly for every candidate, so it must be cheap. The
-        // FP64 pow() here was the dominant cost of build_ant_solution (~28e9 FP64
-        // instr/launch on pla85900, ~3% of FP64 peak). beta is almost always a
-        // small integer (default 2), so take the float reciprocal of an integer
-        // power and fall back to the single-precision __powf only otherwise. The
-        // distance itself stays double (get_distance) because the tour cost must
-        // match the TSPLIB rounding; the heuristic is only a selection weight.
-        const float dist = static_cast<float>(get_distance(from, to));
+        // recomputed on the fly for every candidate, so it must be cheap. Two
+        // optimisations (the heuristic is only a selection weight, so reduced
+        // precision is fine; the tour cost path keeps the exact double distance):
+        //   dir 1  -- avoid FP64 pow(): integer beta (default 2) uses a float
+        //             reciprocal of an integer power, else single-precision __powf.
+        //   dir 1b -- use the float sqrtf distance (device_node_distance_f)
+        //             instead of the double sqrt in get_distance; this was the
+        //             dominant remaining FP64 cost (the fallback path calls this
+        //             for every unvisited node). Fall back to the exact distance
+        //             only if coordinates are unavailable (should not happen here,
+        //             since matrix-based instances return from heuristic_matrix_).
+        const float dist = (coordinates_ != nullptr)
+            ? device_node_distance_f(edge_weight_type_, coordinates_, from, to)
+            : static_cast<float>(get_distance(from, to));
         if (dist <= 0.0f) {
             return 1.0f;
         }
