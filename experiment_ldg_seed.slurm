@@ -20,11 +20,14 @@
 #   B) 潛在記憶體 bug 被 __ldg 擾動而意外改變表現(Heisenbug)。
 # 判別：兩 binary 只差 src/mmas.cu。固定同組 seed,比同 seed 下的 gap。
 #
-# ★ 此版為「可續跑」設計，配合 1 小時硬上限：
+# ★ 此版為「可續跑 + 自動續投」設計,配合 1 小時硬上限(完整 run 約 2000s,一個 job
+#   通常只跑得了 1 個 run):
 #   - binary 會快取(mmas_noldg / mmas_ldg 已存在就不重建)。
-#   - 每個 (variant, seed) 跑完就寫進對照表;已完成的會跳過。
+#   - 每個 (variant, seed) 跑完寫進對照表,用唯一鍵 [tag:seed] 判斷已完成並跳過
+#     (先前無法跳過是因為 printf 對齊空白讓 grep 比對失敗,已修)。
 #   - 逼近 55 分鐘就停止啟動新 run、乾淨收尾。
-#   => 你只要「重複 sbatch 這支同一個檔」幾次,直到對照表填滿即可。
+#   - AUTO_RESUBMIT=1:結束時若還沒跑完會自動再投遞下一個 job,直到全部完成(有安全上限)。
+#   => 你只要 sbatch 一次,其餘自動接力;不想自動就把 AUTO_RESUBMIT 設 0、自己重複 sbatch。
 # ─────────────────────────────────────────────────────────────
 
 set -uo pipefail   # 不用 -e：單一 run 失敗不該中斷整批
@@ -42,8 +45,10 @@ COMMON="--instance=${INSTANCE} --alg=mmas_rwm_bt_cl --ants=0 --trials=1"
 RESULTS_DIR=results/ldg_seed_experiment
 SUMMARY=ldgexp_summary.txt
 DEADLINE=3300                  # 55 分鐘(秒)。$SECONDS 超過就不再啟動新 run。
-FIRST_RUN_GUESS=2700           # 還沒測過 run 時長時,保守預留 45 分鐘才敢啟動第一個 run
-                               # (避免建置後又賭一個跑不完的 run 被中途砍掉)。
+FIRST_RUN_GUESS=2300           # 還沒測過 run 時長時的保守預留(秒)。完整 run 約 2000s,
+                               # 留些 buffer;太大會讓建置後那個 job 不敢啟動 run。
+AUTO_RESUBMIT=1                # 1=本 job 結束時若還沒跑完就自動再投遞一個 job 續跑(免手動)。
+                               # 設 0 則改回手動:自己重複 sbatch。
 
 mkdir -p "${RESULTS_DIR}"
 
@@ -87,8 +92,11 @@ parse_gap() {  # $1=logfile -> "cost pct"
     echo "$(echo "$line" | sed -E 's/.*cost:[[:space:]]*([0-9]+).*/\1/') $(echo "$line" | sed -E 's/.*\(([0-9.]+)%\).*/\1/')"
 }
 
-already_done() {  # $1=tag $2=seed ; 成功記錄過(gap 非 NA)就回傳 0
-    grep -q "^${1} seed=${2} .*gap=[0-9]" "${SUMMARY}" 2>/dev/null
+already_done() {  # $1=tag $2=seed ; 成功記錄過就回傳 0
+    # 新格式:行尾唯一鍵 [tag:seed],用 grep -F 固定字串比對(不受 printf 對齊空白影響)。
+    grep -qF "[${1}:${2}]" "${SUMMARY}" 2>/dev/null && return 0
+    # 相容舊格式:行首 tag 與 seed= 之間可能有多個空白(這就是先前無法跳過的 bug)。
+    grep -qE "^${1}[[:space:]]+seed=${2}[[:space:]].*gap=[0-9]" "${SUMMARY}" 2>/dev/null
 }
 
 run_one() {  # $1=binary $2=tag $3=seed
@@ -99,9 +107,14 @@ run_one() {  # $1=binary $2=tag $3=seed
     local log="run_${tag}_seed${seed}.log"
     echo "[$(date)] RUN ${tag} seed=${seed} ..."
     ./"${bin}" ${COMMON} --seed=${seed} --results-dir="${RESULTS_DIR}" >"${log}" 2>&1
-    local res; res=$(parse_gap "${log}")
-    printf "%-6s seed=%-4s cost=%-12s gap=%s%%\n" "${tag}" "${seed}" "${res% *}" "${res#* }" \
-        | tee -a "${SUMMARY}"
+    local res cost pct; res=$(parse_gap "${log}"); cost=${res% *}; pct=${res#* }
+    if [ "${pct}" = "NA" ]; then
+        echo "[$(date)] ⚠ ${tag} seed=${seed} 沒有結果(可能被 timeout 砍/執行錯誤),不記錄,下次續跑會重試。log: ${log}"
+        return 1
+    fi
+    # 行尾唯一鍵 [tag:seed] 供 already_done 用 grep -F 比對,杜絕對齊空白問題。
+    printf "%-6s seed=%-4s cost=%-12s gap=%s%%   [%s:%s]\n" \
+        "${tag}" "${seed}" "${cost}" "${pct}" "${tag}" "${seed}" | tee -a "${SUMMARY}"
 }
 
 # ── 3) 依序跑,逼近 DEADLINE 就停(讓未跑的留給下次 sbatch)──
@@ -128,7 +141,27 @@ done
 echo "[$(date)] 本次結束。目前對照表:"
 cat "${SUMMARY}"
 
-# 是否全部完成?
-DONE=$(grep -c "gap=[0-9]" "${SUMMARY}" 2>/dev/null || echo 0)
+# 是否全部完成?(算「有 gap 數字」的列)
+DONE=$(grep -cE "seed=.*gap=[0-9]" "${SUMMARY}" 2>/dev/null || echo 0)
 NEED=$(( $(echo ${SEEDS} | wc -w) * 2 ))
-echo "[$(date)] 進度 ${DONE}/${NEED}。$([ "${DONE}" -ge "${NEED}" ] && echo '全部完成 ✅' || echo '尚未完成 → 請再 sbatch 一次續跑')"
+MAX_ATTEMPTS=$(( NEED * 2 + 3 ))   # 自動續投的安全上限,避免某 run 一直失敗時無限投遞
+echo "[$(date)] 進度 ${DONE}/${NEED}。"
+
+if [ "${DONE}" -ge "${NEED}" ]; then
+    echo "[$(date)] 全部完成 ✅"
+    rm -f ldgexp_attempts
+else
+    echo "[$(date)] 尚未完成。"
+    if [ "${AUTO_RESUBMIT}" = "1" ]; then
+        att=$(( $(cat ldgexp_attempts 2>/dev/null || echo 0) + 1 ))
+        echo "${att}" > ldgexp_attempts
+        if [ "${att}" -le "${MAX_ATTEMPTS}" ] && command -v sbatch >/dev/null 2>&1; then
+            echo "[$(date)] 自動再投遞續跑(第 ${att}/${MAX_ATTEMPTS} 次)。binary 已快取、已完成的會跳過。"
+            sbatch experiment_ldg_seed.slurm || echo "[$(date)] sbatch 自動續投失敗,請手動再 sbatch。"
+        else
+            echo "[$(date)] 不自動續投(達上限 ${MAX_ATTEMPTS} 或無 sbatch)。請手動再 sbatch 續跑。"
+        fi
+    else
+        echo "[$(date)] AUTO_RESUBMIT=0 → 請手動再 sbatch 一次續跑。"
+    fi
+fi
