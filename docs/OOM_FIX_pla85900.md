@@ -409,10 +409,49 @@ const float dist = (coordinates_ != nullptr)
   float 足夠。
 - coords 不存在(理論上只剩 EXPLICIT,但它早從 `heuristic_matrix_` 回傳)時退回精確距離。
 
+### 實測結果(`sbatch profile.slurm --ants=0`,pla85900,2026-06-06)
+
+`profiles/sqrtf/mmas_rwm_bt_cl_pla85900_build_bound.txt`(640 ant):
+
+- **FP64 幾乎歸零**:roofline 報「achieved … close to 0% of its fp64 peak」,FP64 指令
+  僅 ~2.06e7/launch(dir 1 後是 ~3.38e9),剩的只是零星整數轉型。dir 1b 成功。
+- SM 吞吐 20.1%、Memory 吞吐 10.5%、occupancy 12.2%(到 bt 天花板),仍 **latency bound**。
+- stall 結構位移:**L1TEX scoreboard(記憶體相依)39.8% 升為最大宗**,fixed-latency
+  執行相依降到 32.1%。→ 下一步主攻記憶體 stall(見 ④)。
+
+---
+
+## 效能優化④ — read-only data cache(`__ldg`,2026-06-06)
+
+> dir 1b 後最大宗 stall 變成 L1TEX scoreboard 39.8%。ncu 同時報 uncoalesced global
+> load「每 32-byte sector 平均只用 13.7 bytes」、45% excessive sectors。
+
+### 根因
+
+對 **BitmaskTabu(預設 bt)**,fallback 的 `get_candidate(i) == i`,32 個 lane 本應讀
+連續節點;但 tour 後期一個 warp 掃的 32 個連續節點大多已 visited,只剩 1–2 個 thread
+通過 `is_candidate_unvisited` 真正發 `pheromone[node]` load,合併存取退化成**散讀**
+(每 sector 只用到一個 float)。這結構性散讀沒辦法用 cache 改掉,但這些資料在 build
+kernel 期間**全唯讀**,可導到 read-only data cache(sm_70 的 LDG.CI)提升命中率、縮短
+scoreboard 延遲鏈。
+
+### 改法(`src/mmas.cu`,全部只是把唯讀 load 換成 `__ldg(&...)`)
+
+| 位置 | 讀的東西 | 為何唯讀 |
+| --- | --- | --- |
+| `device_node_distance_f` / `device_node_distance` | `coordinates_`(4 筆) | 全程唯讀 |
+| `warp_/block_roulette_choice_from_cand_list` | `cand_lists_[i]`、`cand_lists_product_cache_[i]` | build 期間唯讀,且跨 ant 重用 |
+| `reservoir_sampling_roulette_choice_from_cand_list` | 同上 | 同上 |
+| build kernel fallback 迴圈 | `pheromone[node]`(散讀主源) | build 期間唯讀(evaporate/deposit 是別的 kernel) |
+
+- 不改語意、不開全域 `--use_fast_math`;`__ldg` 只是換 load 走的快取路徑。
+- 非 `_cl` 變體的全域 `product_cache`(n×n)在 pla85900 會 OOM、不在預設熱路徑,未動。
+
 ### 待驗證(`sbatch profile.slurm --ants=0`)
 
-- 預期剩餘 FP64 大降、fixed-latency stall(~32%)縮小、build kernel per-ant 再快一些。
-- 之後 L1TEX 記憶體 stall(~40%)會更突出 → 下一步可做 gather 的合併存取 / `__ldg`。
+- 預期 L1TEX scoreboard stall(39.8%)下降、build kernel per-ant 再快一些;占用率不變
+  (天花板仍 12.5%,`__ldg` 不影響 occupancy)。
+- pla85900 跑得完、gap 不變(純讀取快取路徑改動,數值結果完全相同)。
 
 ---
 

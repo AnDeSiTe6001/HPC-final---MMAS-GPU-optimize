@@ -685,10 +685,11 @@ float device_node_distance(EdgeWeightType type,
                            const double *coords,
                            uint32_t from,
                            uint32_t to) {
-    const double x1 = coords[2 * from];
-    const double y1 = coords[2 * from + 1];
-    const double x2 = coords[2 * to];
-    const double y2 = coords[2 * to + 1];
+    // coords is read-only; use the read-only data cache (see device_node_distance_f).
+    const double x1 = __ldg(&coords[2 * from]);
+    const double y1 = __ldg(&coords[2 * from + 1]);
+    const double x2 = __ldg(&coords[2 * to]);
+    const double y2 = __ldg(&coords[2 * to + 1]);
 
     switch (type) {
         case EUC_2D: {
@@ -748,10 +749,15 @@ float device_node_distance_f(EdgeWeightType type,
                              const double *coords,
                              uint32_t from,
                              uint32_t to) {
-    const float x1 = static_cast<float>(coords[2 * from]);
-    const float y1 = static_cast<float>(coords[2 * from + 1]);
-    const float x2 = static_cast<float>(coords[2 * to]);
-    const float y2 = static_cast<float>(coords[2 * to + 1]);
+    // coords is read-only for the whole kernel, so route these loads through the
+    // read-only data cache (LDG.CI). In the fallback path 32 threads scan strided
+    // nodes and most are predicated off, so the gather is uncoalesced; the
+    // read-only cache raises the hit rate on the reused coords[2*from] broadcast
+    // and on neighbouring nodes, shortening the L1TEX scoreboard stall.
+    const float x1 = static_cast<float>(__ldg(&coords[2 * from]));
+    const float y1 = static_cast<float>(__ldg(&coords[2 * from + 1]));
+    const float x2 = static_cast<float>(__ldg(&coords[2 * to]));
+    const float y2 = static_cast<float>(__ldg(&coords[2 * to + 1]));
 
     switch (type) {
         case EUC_2D: {
@@ -1316,10 +1322,12 @@ uint32_t warp_roulette_choice_from_cand_list(
     const auto offset = instance.cand_list_size_ * current_node;
     const auto cand_list = instance.cand_lists_ + offset;
     const auto cand_index = threadIdx.x;
-    const auto cand_node = cand_list[cand_index];
+    // cand_lists_ and the product cache are read-only during the build kernel and
+    // are reused across all ants, so load them through the read-only data cache.
+    const auto cand_node = __ldg(&cand_list[cand_index]);
     const bool is_visited = tabu.is_visited(cand_node);
     const auto product_cache = cand_lists_product_cache + offset;
-    const auto product = is_visited ? 0 : product_cache[cand_index];
+    const auto product = is_visited ? 0 : __ldg(&product_cache[cand_index]);
 
     uint32_t chosen_node = instance.dimension_;
 
@@ -1372,10 +1380,11 @@ uint32_t block_roulette_choice_from_cand_list(
     const auto offset = instance.cand_list_size_ * current_node;
     const auto cand_list = instance.cand_lists_ + offset;
     const auto cand_index = threadIdx.x;
-    const auto cand_node = cand_list[cand_index];
+    // Read-only during the build kernel -> read-only data cache (see the warp variant).
+    const auto cand_node = __ldg(&cand_list[cand_index]);
     const bool is_visited = tabu.is_visited(cand_node);
     const auto product_cache = cand_lists_product_cache + offset;
-    const auto product = is_visited ? 0 : product_cache[cand_index];
+    const auto product = is_visited ? 0 : __ldg(&product_cache[cand_index]);
 
     uint32_t chosen_node = instance.dimension_;
 
@@ -1432,13 +1441,14 @@ uint32_t reservoir_sampling_roulette_choice_from_cand_list(
     float max_key = -FLT_MAX;
 
     for (auto index = threadIdx.x; index < instance.cand_list_size_; index += blockDim.x) {
-        const auto node = cand_list[index];
+        // cand_lists_ / product cache are read-only here -> read-only data cache.
+        const auto node = __ldg(&cand_list[index]);
 
         if ( tabu.is_available(node) ) {
             // We use max(..., FLT_MIN) to avoid computing log(0) for which
             // the result is -infinity
-            const auto r = max(get_random_float(rng), FLT_MIN); 
-            const auto key = __log2f(r) * product[index];
+            const auto r = max(get_random_float(rng), FLT_MIN);
+            const auto key = __log2f(r) * __ldg(&product[index]);
             if (key > max_key || cand_node == instance.dimension_) {
                 cand_node = node;
                 max_key = key;
@@ -1527,7 +1537,12 @@ void build_ant_solution_using_cand_lists(
             for (uint32_t i = threadIdx.x; i < length; i += blockDim.x) {
                 const auto node = tabu.get_candidate(i);
                 if (tabu.is_candidate_unvisited(node)) {
-                    const float product = pheromone[node] * instance.get_heuristic(current_node, node);
+                    // The pheromone row is read-only during this kernel. Late in
+                    // the tour most of the 32 strided nodes a warp scans are
+                    // visited, so this load is a sparse uncoalesced gather and is
+                    // the top L1TEX scoreboard-stall source; the read-only data
+                    // cache raises its hit rate.
+                    const float product = __ldg(&pheromone[node]) * instance.get_heuristic(current_node, node);
                     cand_product = max(cand_product, product);
                     cand_node = cand_product == product ? node : cand_node;
                 }
