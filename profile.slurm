@@ -35,12 +35,21 @@ make -j4 || { echo "Build failed."; exit 1; }
 # ── profiling 目標 ────────────────────────────────────────────
 INSTANCE=ALL_tsp/pla85900.tsp
 ALG=mmas_rwm_bt_cl                  # 與預設一致；_cl 需 block-warps*32 == cand-list-size
+# 實驗（方向 5 評估）：加大候選清單，看 build kernel 的 fallback（候選近鄰用盡時
+# 的 O(n) 全域掃描，是 FP32/散讀 gather 的真正來源）是否變少、總時間是否改善。
+# 限制：block-warps*32 必須 == cand-list-size，且 cand-list-size 是 32 的倍數。
+#   - 基準：CAND_LIST_SIZE=32 BLOCK_WARPS=1（dispatch 走 warp 變體）
+#   - 實驗：CAND_LIST_SIZE=64 BLOCK_WARPS=2（dispatch 自動改走 block 變體，支援 >32 候選）
+# 注意：2-opt LS kernel 寫死 <=32 鄰居（release 下 assert 被 -DNDEBUG 編掉，不會 abort，
+# 但 LS 只會用前 32 個鄰居）。build kernel 會用滿全部 cand-list-size。
+CAND_LIST_SIZE=64
+BLOCK_WARPS=2
 # --iter 不放共用 ARGS：docopt 不接受重複 flag，nsys/ncu 各自帶一次自己的 iter 數。
 # --ants=0：自動填滿 GPU 的 ant 數（方向 2）。stderr 會印 "auto-sized to fill GPU"。
-COMMON_ARGS="--instance=${INSTANCE} --alg=${ALG} --trials=1 --seed=42 --ants=0"
+COMMON_ARGS="--instance=${INSTANCE} --alg=${ALG} --trials=1 --seed=42 --ants=0 --cand-list-size=${CAND_LIST_SIZE} --block-warps=${BLOCK_WARPS}"
 NSYS_ITER=50      # nsys 輕量，可跑完整 iters 看時間軸
 NCU_ITER=5        # ncu 每 kernel replay 多次很慢，iter 設很小
-TAG="${ALG}_$(basename ${INSTANCE} .tsp)"
+TAG="${ALG}_$(basename ${INSTANCE} .tsp)_cl${CAND_LIST_SIZE}"
 mkdir -p profiles
 
 nvidia-smi

@@ -421,37 +421,61 @@ const float dist = (coordinates_ != nullptr)
 
 ---
 
-## 效能優化④ — read-only data cache(`__ldg`,2026-06-06)
+## 效能優化④ —(已試)read-only data cache `__ldg`:**實測無效,已回退**
 
-> dir 1b 後最大宗 stall 變成 L1TEX scoreboard 39.8%。ncu 同時報 uncoalesced global
-> load「每 32-byte sector 平均只用 13.7 bytes」、45% excessive sectors。
+> dir 1b 後最大宗 stall 是 L1TEX scoreboard 39.8%。曾試把 build kernel 期間唯讀的散讀
+> (`coordinates_`、`cand_lists_`、`cand_lists_product_cache`、fallback 的 `pheromone[node]`)
+> 全換成 `__ldg(&...)`,想用 read-only data cache 提命中率、縮短 scoreboard 延遲鏈。
 
-### 根因
+### 實測結果(`profiles/L1TEX scoreboard/…build_bound.txt` vs `profiles/sqrtf/…`,640 ant)
 
-對 **BitmaskTabu(預設 bt)**,fallback 的 `get_candidate(i) == i`,32 個 lane 本應讀
-連續節點;但 tour 後期一個 warp 掃的 32 個連續節點大多已 visited,只剩 1–2 個 thread
-通過 `is_candidate_unvisited` 真正發 `pheromone[node]` load,合併存取退化成**散讀**
-(每 sector 只用到一個 float)。這結構性散讀沒辦法用 cache 改掉,但這些資料在 build
-kernel 期間**全唯讀**,可導到 read-only data cache(sm_70 的 LDG.CI)提升命中率、縮短
-scoreboard 延遲鏈。
+| 指標 | dir 1b(sqrtf) | + `__ldg` | 變化 |
+| --- | --- | --- | --- |
+| Duration | 2.78/2.74/2.73 s | 2.80/2.75/2.74 s | 持平(噪音內,甚至略升) |
+| L1TEX scoreboard stall | 39.78% | 39.89% | **沒降** |
+| Uncoalesced excessive sectors | 19,820,053,952(45%) | **19,820,053,952(45%)** | **逐位元相同** |
+| FP32 指令 | 18.37e9 | 18.37e9 | 相同 |
 
-### 改法(`src/mmas.cu`,全部只是把唯讀 load 換成 `__ldg(&...)`)
+**結論:`__ldg` 無效**,已 `git checkout 7a6c2a7 -- src/mmas.cu` 回退程式碼(本節保留作負面記錄)。
 
-| 位置 | 讀的東西 | 為何唯讀 |
-| --- | --- | --- |
-| `device_node_distance_f` / `device_node_distance` | `coordinates_`(4 筆) | 全程唯讀 |
-| `warp_/block_roulette_choice_from_cand_list` | `cand_lists_[i]`、`cand_lists_product_cache_[i]` | build 期間唯讀,且跨 ant 重用 |
-| `reservoir_sampling_roulette_choice_from_cand_list` | 同上 | 同上 |
-| build kernel fallback 迴圈 | `pheromone[node]`(散讀主源) | build 期間唯讀(evaporate/deposit 是別的 kernel) |
+### 為什麼沒用(重要,避免重蹈)
 
-- 不改語意、不開全域 `--use_fast_math`;`__ldg` 只是換 load 走的快取路徑。
-- 非 `_cl` 變體的全域 `product_cache`(n×n)在 pla85900 會 OOM、不在預設熱路徑,未動。
+1. **流量沒變**:excessive sector 數逐位元相同 —— `__ldg` 只換 load 走的快取路徑,
+   **不改位址、不減少抓取的 sector**。
+2. **Volta 的 read-only cache 就是同一塊 L1**:sm_70 的 L1 與 texture/read-only cache 是
+   統一的實體 SRAM,`__ldg` 只多「唯讀不變」提示、不增容量。
+3. **工作集 >> 快取**:`pheromone[node]` 是對 **27.5 GiB** 矩陣的隨機 gather,遠超任何
+   快取;scoreboard 等的是 **DRAM/L2 延遲**,`__ldg` 動不到。
 
-### 待驗證(`sbatch profile.slurm --ants=0`)
+→ 教訓:這個 kernel 的記憶體 stall 是「working set 爆快取的 DRAM 延遲」,純快取提示無解;
+要嘛**減少散讀流量**(改資料結構,見 ⑤),要嘛**提高 occupancy 用更多 warp 蓋延遲**
+(但 bt 已在 12.5% 天花板)。
 
-- 預期 L1TEX scoreboard stall(39.8%)下降、build kernel per-ant 再快一些;占用率不變
-  (天花板仍 12.5%,`__ldg` 不影響 occupancy)。
-- pla85900 跑得完、gap 不變(純讀取快取路徑改動,數值結果完全相同)。
+---
+
+## 效能優化⑤(評估中)— 加大候選清單,壓低 fallback 頻率
+
+> 18.4e9 FP32 與 45% 散讀的真正來源是 **fallback 路徑**:候選近鄰(預設 32)用盡時改
+> 掃**整個** unvisited(O(n)),每個都 `get_heuristic` + `pheromone[node]` 散讀。tour 後期
+> 頻繁觸發。先用「不改程式碼」的旗標實驗量化它能不能被壓下去。
+
+### 零成本實驗(`profile.slurm` 已設定)
+
+`--cand-list-size=64 --block-warps=2`(基準是 32/1):
+
+- dispatch 在 `threads_per_block != 32` 時自動改走 **block 變體**
+  (`block_roulette_choice_from_cand_list`,支援 >32 候選),不需改碼。
+- NN list 由 `init_nn_lists(cand_list_size)` 建滿 64 鄰居,kd-tree 路徑(CEIL_2D)OK。
+- ⚠ 2-opt LS kernel 寫死 `cand_list_size_ <= WARP_SIZE`:release 下 `assert` 被 `-DNDEBUG`
+  編掉、不會 abort,但 LS 只會用前 32 個鄰居(build kernel 用滿 64)。
+- 量測目標:fallback 觸發次數↓ → FP32 指令↓、散讀 sector↓、總時間↓?同時看 gap 變化
+  (候選清單變大會改變解品質,需一併確認)。
+
+### 待驗證(`sbatch profile.slurm`)
+
+- 比對 `profiles/…_cl64_build_bound.txt` 與 `profiles/sqrtf/…`(cl32)的 FP32/sector/Duration。
+- 若 fallback 確實是主因 → 有效,再考慮把 LS 也擴到 >32、或正式調大預設。
+- 若無感 → fallback 不是瓶頸,改走 ⑥(候選清單式費洛蒙,從根本砍掉 27.5 GiB 隨機 gather)。
 
 ---
 
