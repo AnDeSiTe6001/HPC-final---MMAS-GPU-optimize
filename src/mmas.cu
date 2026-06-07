@@ -734,6 +734,67 @@ float device_node_distance(EdgeWeightType type,
 
 
 /**
+Single-precision distance used ONLY for the heuristic weight (1/dist^beta).
+
+The heuristic is just a selection bias, so float sqrtf is accurate enough and
+much cheaper than the double sqrt in device_node_distance. After dir 1 removed
+the FP64 pow, the dominant remaining FP64 cost in build_ant_solution was this
+sqrt -- the fallback path calls get_heuristic for every unvisited node. The
+tour-cost path (route length, 2-opt) keeps using the exact double
+device_node_distance so the reported cost still matches the TSPLIB rounding.
+*/
+__device__ inline
+float device_node_distance_f(EdgeWeightType type,
+                             const double *coords,
+                             uint32_t from,
+                             uint32_t to) {
+    const float x1 = static_cast<float>(coords[2 * from]);
+    const float y1 = static_cast<float>(coords[2 * from + 1]);
+    const float x2 = static_cast<float>(coords[2 * to]);
+    const float y2 = static_cast<float>(coords[2 * to + 1]);
+
+    switch (type) {
+        case EUC_2D: {
+            const float dx = x2 - x1, dy = y2 - y1;
+            return static_cast<float>(
+                static_cast<int32_t>(sqrtf(dx * dx + dy * dy) + 0.5f));
+        }
+        case CEIL_2D: {
+            const float dx = x2 - x1, dy = y2 - y1;
+            return static_cast<float>(
+                static_cast<int32_t>(ceilf(sqrtf(dx * dx + dy * dy))));
+        }
+        case ATT: {
+            const float xd = x1 - x2, yd = y1 - y2;
+            const float rij = sqrtf((xd * xd + yd * yd) / 10.0f);
+            const int32_t tij = static_cast<int32_t>(rij);
+            return static_cast<float>(tij < rij ? tij + 1 : tij);
+        }
+        case GEO: {
+            const float kPi = 3.14159265358979f;
+            float deg, mn;
+            deg = static_cast<int32_t>(x1); mn = x1 - deg;
+            const float lati = kPi * (deg + 5.0f * mn / 3.0f) / 180.0f;
+            deg = static_cast<int32_t>(x2); mn = x2 - deg;
+            const float latj = kPi * (deg + 5.0f * mn / 3.0f) / 180.0f;
+            deg = static_cast<int32_t>(y1); mn = y1 - deg;
+            const float longi = kPi * (deg + 5.0f * mn / 3.0f) / 180.0f;
+            deg = static_cast<int32_t>(y2); mn = y2 - deg;
+            const float longj = kPi * (deg + 5.0f * mn / 3.0f) / 180.0f;
+            const float q1 = cosf(longi - longj);
+            const float q2 = cosf(lati - latj);
+            const float q3 = cosf(lati + latj);
+            return static_cast<float>(static_cast<int32_t>(
+                6378.388f * acosf(0.5f * ((1.0f + q1) * q2 - (1.0f - q1) * q3))
+                + 1.0f));
+        }
+        default:
+            return 0.0f;  // EXPLICIT: handled via heuristic_matrix_
+    }
+}
+
+
+/**
 Gathers problem instance-related data to lower number of parameters
 passed to kernels.
 
@@ -780,14 +841,20 @@ struct InstanceContext {
             return heuristic_matrix_[static_cast<size_t>(from) * dimension_ + to];
         }
         // heuristic = 1 / dist^beta. For coordinate-based instances this is
-        // recomputed on the fly for every candidate, so it must be cheap. The
-        // FP64 pow() here was the dominant cost of build_ant_solution (~28e9 FP64
-        // instr/launch on pla85900, ~3% of FP64 peak). beta is almost always a
-        // small integer (default 2), so take the float reciprocal of an integer
-        // power and fall back to the single-precision __powf only otherwise. The
-        // distance itself stays double (get_distance) because the tour cost must
-        // match the TSPLIB rounding; the heuristic is only a selection weight.
-        const float dist = static_cast<float>(get_distance(from, to));
+        // recomputed on the fly for every candidate, so it must be cheap. Two
+        // optimisations (the heuristic is only a selection weight, so reduced
+        // precision is fine; the tour cost path keeps the exact double distance):
+        //   dir 1  -- avoid FP64 pow(): integer beta (default 2) uses a float
+        //             reciprocal of an integer power, else single-precision __powf.
+        //   dir 1b -- use the float sqrtf distance (device_node_distance_f)
+        //             instead of the double sqrt in get_distance; this was the
+        //             dominant remaining FP64 cost (the fallback path calls this
+        //             for every unvisited node). Fall back to the exact distance
+        //             only if coordinates are unavailable (should not happen here,
+        //             since matrix-based instances return from heuristic_matrix_).
+        const float dist = (coordinates_ != nullptr)
+            ? device_node_distance_f(edge_weight_type_, coordinates_, from, to)
+            : static_cast<float>(get_distance(from, to));
         if (dist <= 0.0f) {
             return 1.0f;
         }
@@ -2190,7 +2257,8 @@ two_opt_nn(InstanceContext instance,
     // the recorded thread id no longer matched the recorded gain, and a
     // wrong/over-long segment was reversed. That race only fires when
     // ls_warps_per_block > 1 (= clamp(ceil(n/320),1,32)), i.e. on large
-    // instances such as pla85900 (32 warps).
+    // instances such as pla85900 (32 warps), and was the root cause of the ~30%
+    // plateau (single-warp LS confirmed ~10%).
     __shared__ unsigned long long chosen_move_packed;  // 0 = no winning move yet
     __shared__ bool any_candidate_nodes;
     __shared__ int32_t move_beg;
@@ -2509,13 +2577,17 @@ json run_gpu_based_mmas(ProblemInstance &instance,
         }
     }
     device_vector<uint32_t> d_cand_lists(cand_lists);
-    device_vector<uint32_t> d_ant_routes(params.ants_count_ * dimension);
+    const size_t ant_buffer_elems =
+        static_cast<size_t>(params.ants_count_) * dimension;
+    device_vector<uint32_t> d_ant_routes(ant_buffer_elems);
     device_vector<float>    d_route_costs(params.ants_count_,
                                           numeric_limits<float>::max());
-    device_vector<int32_t> d_pos_in_routes(params.ants_count_ * dimension);
-    device_vector<int8_t> d_dont_look_bits(params.ants_count_ * dimension);
-    
-    device_vector<uint32_t> d_temp_ant_routes(params.ants_count_ * dimension);
+    // pos_in_routes and dont_look_bits are only read/written by the 2-opt
+    // local search (two_opt_nn). When LS is off they are never touched, so
+    // allocate nothing -- this frees ants*n*(4+1) bytes, which on large
+    // instances lets a much larger (auto-sized) ant count fit in memory.
+    device_vector<int32_t> d_pos_in_routes(use_local_search ? ant_buffer_elems : 0);
+    device_vector<int8_t>  d_dont_look_bits(use_local_search ? ant_buffer_elems : 0);
 
     const auto blocks_count = params.ants_count_;
     const uint32_t threads_per_block = warps_per_block * WARP_SIZE;
@@ -2930,6 +3002,77 @@ bool make_path(const std::string& path) {
 
 
 /**
+Picks an ant count that fills the GPU, used when --ants=0 is requested.
+
+One ant maps to one solution-build thread block, so the ant count *is* the
+number of blocks and therefore directly bounds how many warps are in flight.
+The historical "0 => dimension" rule OOMs on large instances (the per-ant
+buffers grow with ants*n), while a small hand-picked value leaves the GPU
+starved -- pla85900 with 100 ants measured ~1.95% achieved occupancy. Instead
+we size the ant count to saturate the SMs, capped by the free device memory
+left after the fixed allocations (dominated by the n*n pheromone matrix) and by
+the node count. Called before any device_vector is allocated, so cudaMemGetInfo
+reports (total - CUDA context); we subtract the upcoming fixed allocations
+ourselves and keep a safety margin for fragmentation.
+*/
+static uint32_t compute_auto_ant_count(
+        const ProblemInstance &instance,
+        std::map<std::string, docopt::value> &args) {
+
+    const size_t n = instance.dimension_;
+    const uint32_t cand_list_size = args["--cand-list-size"].asLong();
+    const uint32_t warps_per_block =
+        std::max<long>(1, args["--block-warps"].asLong());
+    const bool use_ls = args["--ls"].asLong() == 1;
+    const bool coord_based = (instance.edge_weight_type_ != EXPLICIT)
+                             && !instance.coordinates_.empty();
+
+    // Occupancy target: oversubscribe the SMs (> the shared-memory residency
+    // ceiling) so the schedulers stay fed and the tail stays balanced; the
+    // hardware caps the actually-resident blocks.
+    int device = 0;
+    CUDA_CHECK(cudaGetDevice(&device));
+    cudaDeviceProp prop;
+    CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+    // 8 warps/SM matches the shared-memory occupancy ceiling for BitmaskTabu on
+    // pla85900 (theoretical 12.5% = 2 warps/scheduler x 4 schedulers). That is
+    // enough to saturate occupancy without 2x oversubscribing memory and
+    // doubling the per-launch duration; the hardware queues any extra blocks.
+    const size_t target_warps_per_sm = 8;
+    const size_t occupancy_ants =
+        static_cast<size_t>(prop.multiProcessorCount) * target_warps_per_sm
+        / warps_per_block;
+
+    // Memory budget. Mirror the fixed allocations made in run_gpu_based_mmas.
+    size_t free_bytes = 0, total_bytes = 0;
+    CUDA_CHECK(cudaMemGetInfo(&free_bytes, &total_bytes));
+    size_t fixed = n * n * sizeof(float);                  // d_pheromone
+    if (!coord_based) {
+        fixed += 2 * n * n * sizeof(float);                // d_heuristic + d_dist_matrix
+    } else {
+        fixed += 2 * n * sizeof(double);                   // d_coordinates
+    }
+    fixed += 2 * n * cand_list_size * sizeof(uint32_t);    // cand lists + product cache
+    fixed += 3 * n * sizeof(uint32_t);                     // iter/global/reset best routes
+
+    size_t per_ant = n * sizeof(uint32_t)                  // d_ant_routes
+                   + sizeof(float)                         // d_route_costs
+                   + warps_per_block * WARP_SIZE * sizeof(rand_state_t);  // d_rng_states
+    if (use_ls) {                                          // 2-opt-only buffers
+        per_ant += n * (sizeof(int32_t) + sizeof(int8_t)); // pos_in_routes + dont_look_bits
+    }
+
+    const size_t safety = size_t{1} << 30;                 // 1 GiB headroom
+    const size_t budget =
+        (free_bytes > fixed + safety) ? free_bytes - fixed - safety : 0;
+    const size_t mem_ants = per_ant ? budget / per_ant : 0;
+
+    size_t ants = std::min({occupancy_ants, mem_ants, n});
+    return static_cast<uint32_t>(ants < 1 ? 1 : ants);
+}
+
+
+/**
  * Runs the MMAS based on the command line arguments passed in args
  */
 void run_mmas_experiment(std::map<std::string, docopt::value> &args) {
@@ -2949,8 +3092,16 @@ void run_mmas_experiment(std::map<std::string, docopt::value> &args) {
     cerr << "[DBG] instance loaded, dim=" << instance.dimension_ << endl;
 
     const auto dimension = instance.dimension_;
-    const auto ants_count = args["--ants"].asLong() ? args["--ants"].asLong()
-                                                    : dimension;
+    // --ants=0 means "auto-size to fill the GPU" (see compute_auto_ant_count);
+    // any positive value is taken verbatim. Default is 100 (see USAGE), so
+    // existing runs/benchmarks are unaffected unless they opt in with --ants=0.
+    const long ants_arg = args["--ants"].asLong();
+    const uint32_t ants_count = (ants_arg > 0)
+        ? static_cast<uint32_t>(ants_arg)
+        : compute_auto_ant_count(instance, args);
+    cerr << "[DBG] ants_count = " << ants_count
+         << (ants_arg > 0 ? " (from --ants)" : " (auto-sized to fill GPU)")
+         << endl;
 
     MMASParameters params;
     params.ants_count_ = ants_count;

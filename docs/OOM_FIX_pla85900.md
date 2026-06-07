@@ -307,6 +307,57 @@ eligible warps 0.12、0.2 wave),但主因從「FP64 compute 延遲」變成兩�
 
 ---
 
+## 效能優化② — 自動填滿 GPU 的 ant 數(方向 2,2026-06-06)
+
+> build kernel 是 latency / occupancy bound:warp 數 = ant 數(`blocks_count = ants_count`),
+> 預設只有 100 隻 → 每個 scheduler 平均 < 2 active warp,achieved occupancy 僅 ~1.95%
+> (理論天花板 12.5%),長延遲指令完全藏不住。
+
+### 改法(`src/mmas.cu` / `src/main.cc`)
+
+1. **`--ants=0` ⇒ 自動依 GPU 大小決定 ant 數**(新增 `compute_auto_ant_count`):取
+   `min(占用率目標 SM×8/block-warps, 記憶體預算, n)`。預設仍 100,既有 benchmark 不受影響;
+   大實例請用 `--ants=0` 開到滿。
+2. **LS 專用緩衝依 `--ls` gate**:`d_pos_in_routes` / `d_dont_look_bits` 在不開 LS 時配置 0,
+   並刪掉死碼 `d_temp_ant_routes`。省下 `ants×n×(4+1) B`,讓自動 ant 數能開更大。
+
+### 實測(`sbatch profile.slurm --ants=0`,pla85900)
+
+- `--ants=0` → 640 隻 ant:achieved occupancy 1.95% → **12.3%**(逼近 bt 天花板 12.5%);
+  per-ant 時間 ↓ ~5.5×。
+- ⚠ ncu 的 Duration 是「一次 launch = 全部 ant」,ant 變多 launch 時間變長是正常,要看
+  **per-ant throughput**。`target_warps_per_sm = 8`(≈640 ant)即足以吃滿占用率,不需 2× 超額。
+
+---
+
+## 效能優化③ — heuristic 距離改 float `sqrtf`(方向 1b,2026-06-06)
+
+> 效能優化① 砍掉 FP64 `pow` 後,build kernel 剩餘的 FP64 幾乎都是 `get_distance` 的
+> double `sqrt`,熱點在「候選清單近鄰用盡 → 掃整個 unvisited」的 fallback,每個節點都呼叫。
+
+### 改法(`src/mmas.cu`)
+
+新增**只給 heuristic 用**的單精度距離 `device_node_distance_f()`(用 `sqrtf`/`ceilf`/`cosf`
+/`acosf`),`get_heuristic` 改用它:
+
+```cpp
+const float dist = (coordinates_ != nullptr)
+    ? device_node_distance_f(edge_weight_type_, coordinates_, from, to)  // 1b
+    : static_cast<float>(get_distance(from, to));                        // 退路
+```
+
+- **tour cost 路徑完全不動**:route length / 2-opt 仍走 double 的 `get_distance` /
+  `device_node_distance`,成本仍對齊 TSPLIB 取整與 best-known。heuristic 只是選點權重,
+  float 足夠。
+
+### 實測(`sbatch profile.slurm --ants=0`,pla85900,640 ant)
+
+- FP64 指令 ~3.38e9 → **~2.06e7/launch**(roofline 報 fp64「close to 0%」),dir 1b 成功。
+- 瓶頸位移到記憶體 latency(L1TEX scoreboard ~40%);曾試 `__ldg` 但**實測無效**
+  (Volta read-only cache 即同一塊 L1,工作集遠超快取),已捨棄。
+
+---
+
 ## 修法⑥(bug 修) — 2-opt LS 在大實例「靜默不啟動」(pla85900 解品質卡 30% 的真因,2026-06-07)
 
 OOM 修好後,pla85900 仍長期卡在 **~30% gap**,而小實例(att48…)正常。這其實是一個與

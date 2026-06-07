@@ -32,8 +32,11 @@ R"(GPU-based MMAS.
                             [default: 1]
     --iter=<n>              Number of iterations per trial - if 0 is given then 
                             it is set so that 1 million sol. are build [default: 1000]
-    --ants=<n>              Number of ants, if 0 then #ants equals the size
-                            of a problem (TSP instance) [default: 100]
+    --ants=<n>              Number of ants (= solution-build thread blocks).
+                            If 0, auto-size to fill the GPU within the free
+                            device memory (see compute_auto_ant_count); this is
+                            the recommended setting for large instances where a
+                            fixed small count leaves the GPU starved. [default: 100]
     --seed=<n>              Seed for the random number generator, if 0 time-based
                             value is used [default: 0]
     --cand-list-size=<n>    Size of the candidate lists used in the MMAS,
