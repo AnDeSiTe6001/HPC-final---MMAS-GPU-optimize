@@ -1,0 +1,10 @@
+# 在叢集(Linux)上執行的腳本必須用 LF 行尾,否則 sbatch/bash 會因 \r 報
+# "bad interpreter: /bin/bash^M"。本機是 Windows(core.autocrlf=true),故強制這些
+# 檔在 repo 內一律存成 LF。
+*.slurm    text eol=lf
+*.sh       text eol=lf
+Makefile   text eol=lf
+*.cu       text eol=lf
+*.cc       text eol=lf
+*.h        text eol=lf
+*.hpp      text eol=lf
