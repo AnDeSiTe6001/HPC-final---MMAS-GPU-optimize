@@ -2210,6 +2210,11 @@ bool reverse_route_segment(int32_t beg, int32_t end,
             pos_in_route[x] = yi;
             pos_in_route[y] = xi;
         }
+        // Match the first case: the caller (and thread 0's dont-look updates)
+        // reads route[]/pos_in_route[] right after this returns, so all writers
+        // must finish first. Missing here, this raced once the LS actually ran
+        // with multiple warps.
+        __syncthreads();
     }
     return false;
 }
@@ -2225,8 +2230,16 @@ speed up the search. Additionaly, the "don't look bits" heuristic as proposed
 by Bentely is also applied to speed up the search further at a possible
 expense of a slightly longer route.
 */
+// __launch_bounds__: ls_warps_per_block can reach 32 (= 1024 threads/block) for
+// large instances. Without this cap the register-heavy kernel used > 64
+// registers/thread, so 1024 * regs exceeded the V100 per-block register file and
+// the launch failed with cudaErrorLaunchOutOfResources -- which, because the
+// launch error was never checked, meant the LS silently did NOTHING on large
+// instances (pla85900 stuck ~30%; single-warp LS worked because 32 threads fit).
+// Forcing <= 64 registers/thread guarantees the configured block size launches.
 __global__
-void two_opt_nn(InstanceContext instance,
+void __launch_bounds__(32 * WARP_SIZE)
+two_opt_nn(InstanceContext instance,
                 uint32_t *all_routes,
                 int32_t *all_pos_in_route,
                 int8_t *all_dont_look_bits,
@@ -2712,6 +2725,9 @@ json run_gpu_based_mmas(ProblemInstance &instance,
                 d_dont_look_bits,
                 mmas_ctx.ant_route_costs_
             );
+            // Catch launch-config failures immediately. This used to be silent:
+            // a failed LS launch left tours un-optimised (the ~30% plateau).
+            CUDA_CHECK(cudaGetLastError());
             ls_timer.accumulate_elapsed();
         }
 

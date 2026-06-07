@@ -479,58 +479,60 @@ const float dist = (coordinates_ != nullptr)
 
 ---
 
-## 修法⑤(bug 修) — 2-opt LS 跨 warp race(pla85900 解品質卡 30% 的真因,2026-06-07)
+## 修法⑤(bug 修) — 2-opt LS 在大實例「靜默不啟動」(pla85900 卡 30% 的真因,2026-06-07)
 
-> 這是調查「`__ldg` 為何讓 gap 從 30%→5%」時挖出來的真正 bug。結論:**`__ldg` 不是修復**,
-> 只是用重編譯擾動了這個 race;正解是把 race 修掉,讓 5% 對所有實例/seed/建置都成立。
+> 這是調查「`__ldg` 為何讓 gap 從 30%→5%」時挖出來的真正 bug。結論:**`__ldg` 從不是修復**,
+> 它只是意外降低暫存器用量,讓原本啟動失敗的 LS kernel 得以啟動。正解是直接保證 LS 能啟動。
 
-### 症狀與定位
+### 症狀與定位(逐步縮小)
 
-- pla85900 解品質長期卡 ~30%,小實例(att48…)正常。
-- 固定 seed=42 對照:無 `__ldg` 34.3% vs 有 `__ldg` 5.7%(ant 數都 640)。預設選點路徑是
-  確定性的,`__ldg` 對唯讀資料卻改變結果 → 典型 Heisenbug。
-- 收斂曲線:**第 0 代就分岔**(無 ldg 108% vs 有 ldg 11%)。第 0 代費洛蒙還均勻、回饋未
-  作用 → bug 在「建解 + 2-opt LS」;建解兩 binary 相同 → 矛頭指向 **2-opt LS**。
+1. 固定 seed=42 對照:無 `__ldg` 34.3% vs 有 `__ldg` 5.7%(ant 都 640)→ 排除種子變異。
+2. 收斂曲線第 0 代就分岔(108% vs 11%),費洛蒙未作用 → bug 在「建解 + 2-opt LS」。
+3. `--ls-block-warps=1`(強制單 warp)→ 第 0 代 108.66%→**9.97%** → 指向多 warp LS。
+4. **關鍵**:完整跑的 GPUTimer 顯示 **`Local search time ≈ 0.0038 ms`(event 計時、為真)**
+   → 多 warp LS **根本沒執行**。
 
-### 根因(`two_opt_nn`,`src/mmas.cu`)
+### 根因(`two_opt_nn` 啟動失敗,`src/mmas.cu`)
 
-每步要在 block 內所有 warp 的候選移動中選 gain 最大者。舊碼:
+`ls_warps_per_block = clamp(ceil(n/320), 1, 32)`(`mmas.cu:~3408`):
+- att48 等小實例 → 1 warp(32 threads)→ 啟動 OK → LS 正常。
+- **pla85900 → 32 warp = 1024 threads/block**。`two_opt_nn` 暫存器很重(> 64 regs/thread),
+  `1024 × regs > 65536`(V100 每 block 暫存器檔上限)→ 啟動回傳
+  `cudaErrorLaunchOutOfResources`、**kernel 沒跑**。而 LS launch **沒有任何錯誤檢查**,
+  失敗被靜默吞掉 → tour 不被優化 → 卡在建解的 ~108%/34%。
+- **`__ldg` 的真正機制**:read-only load 釋放暫存器,把 `two_opt_nn` 壓到 ≤ 64 regs/thread →
+  1024-thread LS 終於能啟動 → 5.7%。這才是 Heisenbug 的本質(與「選錯移動」無關)。
 
-```cpp
-if (atomicMax(&chosen_move_gain, max_gain) < max_gain)  // 原子更新 gain
-    chosen_move_thread_id = threadIdx.x;                // 但這行非原子、與上面分離
-```
-
-`atomicMax` 與緊接的寫入**不是單一原子操作**。多 warp 交錯時,`chosen_move_thread_id` 會
-對不上 `chosen_move_gain` 的真正擁有者 → 套用到與選定 gain 不符的 `move_beg/move_end`,
-反轉錯誤(常常過長)的路段 → LS 走歪。
-
-**觸發條件**:`ls_warps_per_block = clamp(ceil(n/320), 1, 32)`(`mmas.cu:3408`)。
-att48=1 warp(無跨 warp、無 race,正常);**pla85900=32 warp(race 全面爆發)**。
+這解釋了**為何所有舊版本在 pla85900 都卡 30%**:大實例 → 多 warp LS → 啟動失敗。
 
 ### 確認(`confirm_ls_race.slurm`,--iter=1)
 
 | | 第 0 代 gap |
 | --- | --- |
-| noldg 預設(32 LS warp) | 108.66% |
-| noldg `--ls-block-warps=1`(單 warp,race 不可能) | **9.97%** |
+| noldg 預設(32 LS warp,LS 啟動失敗) | 108.66% |
+| noldg `--ls-block-warps=1`(32 threads,LS 啟動成功) | **9.97%** |
 
-單 warp 一關掉 race 就正常 → 鐵證是這個 race,與 `__ldg` 無關。
+`Local search time ≈ 0.0038 ms`(完整跑)= LS 沒在做事的鐵證。
 
-### 修法
+### 修法(三項)
 
-把 `(gain, thread_id)` 打包進**單一 64-bit `atomicMax`**:gain 的 float 位元樣式(正值
-單調)放高 32 位、thread id 放低 32 位。一次原子操作同時定出 gain 與擁有者,winner 一致
-讀回(`chosen_move_packed & 0xFFFFFFFF`);gain 相同則由較大 tid 決勝(確定性)。
+1. **`__launch_bounds__(32*WARP_SIZE)` 加到 `two_opt_nn`**(主修):強制編譯器把暫存器壓到
+   ≤ 64/thread,**保證 1024-thread 的 LS 一定能啟動**(必要時 spill,但 LS 本來等於沒跑,
+   能跑就是巨大改善)。
+2. **LS launch 後加 `CUDA_CHECK(cudaGetLastError())`**:啟動失敗從此會大聲報錯,不再靜默。
+3. **`(gain, thread_id)` 打包進單一 64-bit `atomicMax`**(原 race 修法):LS 現在會多 warp
+   執行,所以原本「`atomicMax(gain)` 後分開寫 `thread_id`」的跨 warp race 必須一併修掉,
+   否則會選錯移動。winner 一致讀回(`packed & 0xFFFFFFFF`),gain 同值由較大 tid 決勝。
+   另外補上 `reverse_route_segment` 第二 case 缺的 `__syncthreads`(多 warp 才會 race)。
 
-- race-free、對**所有實例/seed/建置**都正確,**不需 `__ldg`、不犧牲 LS 多 warp 平行度**。
-- 小實例行為不變(本來就單 warp);只是現在也完全確定性。
+全部 race-free、對所有實例/seed/建置正確、不需 `__ldg`、不犧牲 LS 多 warp 平行度。
 
-### 待驗證(`sbatch`)
+### 待驗證(`sbatch run.slurm`,pla85900,`--ants=0`,預設 32 LS warp)
 
-- pla85900 + 預設(32 LS warp)+ `--ants=0` → gap 應達 ~5–6%(與單 warp / `__ldg` 同級),
-  且**不需 `--ls-block-warps=1`**。
-- 可用 `Makefile mode=sanitize` + `compute-sanitizer --tool racecheck` 佐證 race 已消失。
+- gap 應達 ~5–6%(與單 warp / `__ldg` 同級),且 **`Local search time` 不再是 ~0**。
+- 若 `__launch_bounds__` 仍不足以啟動,第 2 項的 `CUDA_CHECK` 會明確報
+  `cudaErrorLaunchOutOfResources`(而非靜默卡 30%)。
+- 編譯時 `-Xptxas=-v` 會印 `two_opt_nn` 的暫存器數(在 `.err`),可核對是否 ≤ 64。
 
 ---
 
