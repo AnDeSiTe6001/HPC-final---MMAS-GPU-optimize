@@ -16,7 +16,12 @@ mode = release
 
 ifeq ($(mode),release)
 	CXXFLAGS = -pipe -std=c++14 -Wall -pedantic -O2 -mtune=native -march=native -DNDEBUG  -flto
-	NVCCFLAGS = -std=c++14 -Xptxas="-v"  $(COMPUTE_CAPABILITY) -DNDEBUG 
+	NVCCFLAGS = -std=c++14 -Xptxas="-v"  $(COMPUTE_CAPABILITY) -DNDEBUG
+else ifeq ($(mode),sanitize)
+	# 抓 bug 用：保留 assert(不加 -DNDEBUG)以攔截越界索引,加 -lineinfo 讓
+	# compute-sanitizer / cuda-gdb 對得回原始碼行,仍用 -O2(非 -G)維持夠快。
+	CXXFLAGS = -g -pipe -std=c++14 -Wall -O2
+	NVCCFLAGS = -std=c++14 -lineinfo -O2  $(COMPUTE_CAPABILITY)
 else
 	CXXFLAGS = -g -pipe -std=c++14 -Wall -O0
 	NVCCFLAGS = -G -std=c++14 -m64  $(COMPUTE_CAPABILITY)
