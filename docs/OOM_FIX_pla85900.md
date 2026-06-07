@@ -479,6 +479,61 @@ const float dist = (coordinates_ != nullptr)
 
 ---
 
+## 修法⑤(bug 修) — 2-opt LS 跨 warp race(pla85900 解品質卡 30% 的真因,2026-06-07)
+
+> 這是調查「`__ldg` 為何讓 gap 從 30%→5%」時挖出來的真正 bug。結論:**`__ldg` 不是修復**,
+> 只是用重編譯擾動了這個 race;正解是把 race 修掉,讓 5% 對所有實例/seed/建置都成立。
+
+### 症狀與定位
+
+- pla85900 解品質長期卡 ~30%,小實例(att48…)正常。
+- 固定 seed=42 對照:無 `__ldg` 34.3% vs 有 `__ldg` 5.7%(ant 數都 640)。預設選點路徑是
+  確定性的,`__ldg` 對唯讀資料卻改變結果 → 典型 Heisenbug。
+- 收斂曲線:**第 0 代就分岔**(無 ldg 108% vs 有 ldg 11%)。第 0 代費洛蒙還均勻、回饋未
+  作用 → bug 在「建解 + 2-opt LS」;建解兩 binary 相同 → 矛頭指向 **2-opt LS**。
+
+### 根因(`two_opt_nn`,`src/mmas.cu`)
+
+每步要在 block 內所有 warp 的候選移動中選 gain 最大者。舊碼:
+
+```cpp
+if (atomicMax(&chosen_move_gain, max_gain) < max_gain)  // 原子更新 gain
+    chosen_move_thread_id = threadIdx.x;                // 但這行非原子、與上面分離
+```
+
+`atomicMax` 與緊接的寫入**不是單一原子操作**。多 warp 交錯時,`chosen_move_thread_id` 會
+對不上 `chosen_move_gain` 的真正擁有者 → 套用到與選定 gain 不符的 `move_beg/move_end`,
+反轉錯誤(常常過長)的路段 → LS 走歪。
+
+**觸發條件**:`ls_warps_per_block = clamp(ceil(n/320), 1, 32)`(`mmas.cu:3408`)。
+att48=1 warp(無跨 warp、無 race,正常);**pla85900=32 warp(race 全面爆發)**。
+
+### 確認(`confirm_ls_race.slurm`,--iter=1)
+
+| | 第 0 代 gap |
+| --- | --- |
+| noldg 預設(32 LS warp) | 108.66% |
+| noldg `--ls-block-warps=1`(單 warp,race 不可能) | **9.97%** |
+
+單 warp 一關掉 race 就正常 → 鐵證是這個 race,與 `__ldg` 無關。
+
+### 修法
+
+把 `(gain, thread_id)` 打包進**單一 64-bit `atomicMax`**:gain 的 float 位元樣式(正值
+單調)放高 32 位、thread id 放低 32 位。一次原子操作同時定出 gain 與擁有者,winner 一致
+讀回(`chosen_move_packed & 0xFFFFFFFF`);gain 相同則由較大 tid 決勝(確定性)。
+
+- race-free、對**所有實例/seed/建置**都正確,**不需 `__ldg`、不犧牲 LS 多 warp 平行度**。
+- 小實例行為不變(本來就單 warp);只是現在也完全確定性。
+
+### 待驗證(`sbatch`)
+
+- pla85900 + 預設(32 LS warp)+ `--ants=0` → gap 應達 ~5–6%(與單 warp / `__ldg` 同級),
+  且**不需 `--ls-block-warps=1`**。
+- 可用 `Makefile mode=sanitize` + `compute-sanitizer --tool racecheck` 佐證 race 已消失。
+
+---
+
 ## 結果與記憶體估算
 
 pla85900 在預設 `mmas_rwm_bt_cl` + `--ants=100` 下,GPU 端只剩:
