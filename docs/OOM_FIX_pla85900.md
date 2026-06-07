@@ -307,6 +307,51 @@ eligible warps 0.12、0.2 wave),但主因從「FP64 compute 延遲」變成兩�
 
 ---
 
+## 修法⑥(bug 修) — 2-opt LS 在大實例「靜默不啟動」(pla85900 解品質卡 30% 的真因,2026-06-07)
+
+OOM 修好後,pla85900 仍長期卡在 **~30% gap**,而小實例(att48…)正常。這其實是一個與
+記憶體無關、長期存在的 **2-opt local search bug**。
+
+### 症狀與定位
+
+- 完整跑的 GPUTimer(CUDA event 計時、為真)顯示 **`Local search time ≈ 0.0038 ms`**
+  → 多 warp 的 LS **根本沒執行**;iter 0 的 ~108% 就是「純建解、完全沒 local search」。
+- 強制單 warp(`--ls-block-warps=1`)時:iter 0 從 108.66% → **9.97%** → LS 一旦能跑就正常。
+
+### 根因(`two_opt_nn` 啟動失敗,`src/mmas.cu`)
+
+`ls_warps_per_block = clamp(ceil(n/320), 1, 32)`:
+- 小實例 → 1 warp(32 threads)→ 啟動 OK。
+- **pla85900 → 32 warp = 1024 threads/block**。`two_opt_nn` 暫存器很重(> 64 regs/thread),
+  `1024 × regs > 65536`(V100 每 block 暫存器檔上限)→ 啟動回傳
+  `cudaErrorLaunchOutOfResources`、**kernel 沒跑**。而 LS launch **沒有任何錯誤檢查**,
+  失敗被靜默吞掉 → tour 不被優化 → 卡在建解的 ~30%。
+
+### 修法(三項,皆在 `two_opt_nn` / LS launch 附近)
+
+1. **`__launch_bounds__(32 * WARP_SIZE)` 加到 `two_opt_nn`**(主修):強制編譯器把暫存器壓到
+   ≤ 64/thread,**保證 1024-thread 的 LS 一定能啟動**(必要時 spill;LS 本來等於沒跑,能跑
+   就是巨大改善)。
+2. **LS launch 後加 `CUDA_CHECK(cudaGetLastError())`**:啟動失敗從此會立刻報錯,不再靜默。
+3. **best-move 選擇改用單一 64-bit `atomicMax`**:LS 現在會多 warp 執行,原本
+   「`atomicMax(&chosen_move_gain)` 後*分開*寫 `chosen_move_thread_id`」兩步非原子的跨 warp
+   race(多 warp 才會觸發)必須一併修掉 —— 把 `(gain 的 float 位元樣式, thread id)` 打包進
+   一個 64-bit 值,一次原子定出 gain+擁有者,winner 一致讀回。另補上 `reverse_route_segment`
+   第二 case 缺的 `__syncthreads`(多 warp 才會 race)。
+
+### 實測結果(`sbatch run.slurm`,pla85900,2026-06-07)
+
+| | 修法前 | 修法後 |
+| --- | --- | --- |
+| Final gap | 34.62% | **5.78%** |
+| iter 0 | 108.66% | 11.25% |
+| `Local search time` | 0.0038 ms(沒跑) | 1373.6 ms(正常) |
+
+→ 30% 老 bug 解決;大實例的 LS 終於正常運作。小實例行為不變(本來就單 warp,只是現在也
+完全確定性)。
+
+---
+
 ## 結果與記憶體估算
 
 pla85900 在預設 `mmas_rwm_bt_cl` + `--ants=100` 下,GPU 端只剩:

@@ -2143,6 +2143,11 @@ bool reverse_route_segment(int32_t beg, int32_t end,
             pos_in_route[x] = yi;
             pos_in_route[y] = xi;
         }
+        // Match the first case: the caller (and thread 0's dont-look updates)
+        // reads route[]/pos_in_route[] right after this returns, so all writers
+        // must finish first. Missing here, this raced once the LS actually ran
+        // with multiple warps.
+        __syncthreads();
     }
     return false;
 }
@@ -2158,8 +2163,16 @@ speed up the search. Additionaly, the "don't look bits" heuristic as proposed
 by Bentely is also applied to speed up the search further at a possible
 expense of a slightly longer route.
 */
+// __launch_bounds__: ls_warps_per_block can reach 32 (= 1024 threads/block) for
+// large instances. Without this cap the register-heavy kernel used > 64
+// registers/thread, so 1024 * regs exceeded the V100 per-block register file and
+// the launch failed with cudaErrorLaunchOutOfResources -- which, because the
+// launch error was never checked, meant the LS silently did NOTHING on large
+// instances (pla85900 stuck ~30%; single-warp LS worked because 32 threads fit).
+// Forcing <= 64 registers/thread guarantees the configured block size launches.
 __global__
-void two_opt_nn(InstanceContext instance,
+void __launch_bounds__(32 * WARP_SIZE)
+two_opt_nn(InstanceContext instance,
                 uint32_t *all_routes,
                 int32_t *all_pos_in_route,
                 int8_t *all_dont_look_bits,
@@ -2168,8 +2181,17 @@ void two_opt_nn(InstanceContext instance,
     // This is a dynamically allocated shared memory for the threads in a block
     extern __shared__ char shared_mem[];
 
-    __shared__ uint32_t chosen_move_thread_id;
-    __shared__ float chosen_move_gain;
+    // Winner of the best 2-opt move across all warps in the block. The gain
+    // (high 32 bits, as a float bit-pattern that sorts like the float for
+    // positive values) is packed with the owning thread id (low 32 bits) into a
+    // single 64-bit cell, so one atomicMax selects the winner atomically.
+    // Previously the gain was atomicMax'd and the thread id written in a
+    // *separate* statement; with more than one warp the two could interleave so
+    // the recorded thread id no longer matched the recorded gain, and a
+    // wrong/over-long segment was reversed. That race only fires when
+    // ls_warps_per_block > 1 (= clamp(ceil(n/320),1,32)), i.e. on large
+    // instances such as pla85900 (32 warps).
+    __shared__ unsigned long long chosen_move_packed;  // 0 = no winning move yet
     __shared__ bool any_candidate_nodes;
     __shared__ int32_t move_beg;
     __shared__ int32_t move_end;
@@ -2187,8 +2209,7 @@ void two_opt_nn(InstanceContext instance,
     }
 
     if (threadIdx.x == 0) {
-        chosen_move_thread_id = blockDim.x;  // We use blockDim.x as a sentinel
-        chosen_move_gain = 0;
+        chosen_move_packed = 0;  // real moves have gain > 0, so 0 means "none yet"
         any_candidate_nodes = false;
     }
     __syncthreads();
@@ -2308,9 +2329,15 @@ void two_opt_nn(InstanceContext instance,
                 } else {  // At least one thread found a move with a positive gain
                     auto warp_max = warp_all_reduce_max(max_gain);
                     if (max_gain == warp_max && max_gain > 0) {
-                        if (atomicMax(&chosen_move_gain, max_gain) < max_gain) {
-                            chosen_move_thread_id = threadIdx.x;
-                        }
+                        // Pack the gain (high bits) and thread id (low bits) so a
+                        // single atomicMax keeps the winning gain and its owner
+                        // consistent across warps. For positive floats the raw
+                        // bit-pattern orders like the value; ties in gain are
+                        // broken by the larger thread id (deterministic).
+                        const unsigned long long packed =
+                            (static_cast<unsigned long long>(__float_as_uint(max_gain)) << 32)
+                            | static_cast<unsigned long long>(threadIdx.x);
+                        atomicMax(&chosen_move_packed, packed);
                     }
                 }
                 if (get_warp_lane_id() == 0) {
@@ -2320,8 +2347,10 @@ void two_opt_nn(InstanceContext instance,
 
             __syncthreads();
 
-            if (chosen_move_thread_id != blockDim.x) {  // Has anyone found a valid move?
-                if (threadIdx.x == chosen_move_thread_id) {
+            if (chosen_move_packed != 0) {  // Has anyone found a valid move?
+                const uint32_t winner_tid =
+                    static_cast<uint32_t>(chosen_move_packed & 0xFFFFFFFFull);
+                if (threadIdx.x == winner_tid) {
                     move_beg = left;  // Winner shares the start and end of the
                     move_end = right; // route segment to reverse
                 }
@@ -2341,10 +2370,8 @@ void two_opt_nn(InstanceContext instance,
                     dont_look_bits[route[ (left > 0) ? left-1 : n-1 ]] = 0;
                     dont_look_bits[route[ (right < n) ? right : 0 ]] = 0;
 
-                    // Clear the id of the winner so that the next move can be
-                    // identified normally
-                    chosen_move_thread_id = blockDim.x;
-                    chosen_move_gain = 0;
+                    // Clear the winner so that the next move can be identified
+                    chosen_move_packed = 0;
                     any_candidate_nodes = false;
                 }
                 __syncthreads();
@@ -2626,6 +2653,9 @@ json run_gpu_based_mmas(ProblemInstance &instance,
                 d_dont_look_bits,
                 mmas_ctx.ant_route_costs_
             );
+            // Catch launch-config failures immediately. This used to be silent:
+            // a failed LS launch left tours un-optimised (the ~30% plateau).
+            CUDA_CHECK(cudaGetLastError());
             ls_timer.accumulate_elapsed();
         }
 
