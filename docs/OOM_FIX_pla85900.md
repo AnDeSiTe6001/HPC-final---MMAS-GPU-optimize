@@ -369,14 +369,98 @@ OOM 修好後,pla85900 仍長期卡在 **~30% gap**,而小實例(att48…)正常
   → 多 warp 的 LS **根本沒執行**;iter 0 的 ~108% 就是「純建解、完全沒 local search」。
 - 強制單 warp(`--ls-block-warps=1`)時:iter 0 從 108.66% → **9.97%** → LS 一旦能跑就正常。
 
+> **「iter 0 = 108%」怎麼讀**:LS launch 被默默吞掉時,tour 完全沒被 2-opt 改善,iter 0 印出的
+> 108% **數值上等價於「沒套 2-opt 的純建解品質」**。>100% 代表長度超過最佳解兩倍多,在大實例、
+> iter 0(費洛蒙還全是 τ_max、幾乎只靠 heuristic+隨機建解)且無 local search 時很正常。注意這
+> **不是**刻意的 no-LS 跑法 ——程式開了 `--ls=1`、以為在跑 LS,只是 launch 失敗;但結果與不跑
+> 2-opt 一致。佐證:強制單 warp LS(能啟動)→ iter 0 108.66% → 9.97%;修好後 final gap
+> 34.62% → 5.78%。
+
 ### 根因(`two_opt_nn` 啟動失敗,`src/mmas.cu`)
 
-`ls_warps_per_block = clamp(ceil(n/320), 1, 32)`:
+`ls_warps_per_block = clamp(ceil(n/320), 1, 32)`(`src/main.cc:3439`,`--ls-block-warps=0` 自動模式):
 - 小實例 → 1 warp(32 threads)→ 啟動 OK。
 - **pla85900 → 32 warp = 1024 threads/block**。`two_opt_nn` 暫存器很重(> 64 regs/thread),
   `1024 × regs > 65536`(V100 每 block 暫存器檔上限)→ 啟動回傳
   `cudaErrorLaunchOutOfResources`、**kernel 沒跑**。而 LS launch **沒有任何錯誤檢查**,
   失敗被靜默吞掉 → tour 不被優化 → 卡在建解的 ~30%。
+
+> **別把 LS 的 warp 數和 build kernel 搞混**:這支 `two_opt_nn` 與建解 kernel 是**兩支不同的
+> kernel**,block 配置也不同 —— LS 的 32 warp 跟 `cand_list_size` 無關。
+>
+> | | build kernel(建解) | `two_opt_nn`(2-opt LS) |
+> | --- | --- | --- |
+> | 一個 block 算什麼 | 一隻螞蟻建一條 tour | 對一條 tour 做 2-opt 改善 |
+> | block 大小 | `warps_per_block×32` = `cand_list_size` = **1 warp(32 threads)** | `ls_warps_per_block×32`,**最多 32 warp(1024 threads)** |
+> | warp 數由誰決定 | `cand_list_size`(固定 32,一 lane 對一候選 slot) | **n**:`clamp(ceil(n/320),1,32)`,用多 warp 平行掃整條路徑 |
+> | 大/小實例差別 | 都是 1 warp | att48→`ceil(48/320)`=1 warp;pla85900→`ceil(85900/320)`→clamp=32 warp |
+>
+> 所以「pla85900 → 32 warp」是 **LS** 因路徑長(85900 節點、~10 節點/thread)配到上限,
+> 1024-thread block 才撐爆暫存器檔;小實例只配 1 warp 遠低於上限,故一直正常。build kernel
+> 那 1 warp/block 是另一回事(也是占用率討論裡 warp 不足的主角),別與此處混為一談。
+
+#### `ceil(n/320)` 怎麼拆 —— `10*32` 的真正語意
+
+`src/main.cc:3439` 的註解寫「1 warp per 10 nodes」其實**不精確**;工作分配的單位是 **thread**,
+不是 warp。`10 * 32 = 320` 應該這樣拆:
+
+```
+10 * 32  =  (每個 thread 顧 ~10 個 node)  ×  (每個 warp 32 個 thread = WARP_SIZE)
+         =  一個 warp 能顧的 node 數  =  320
+
+ls_warps_per_block = ceil( n / 320 ) = 「一個 block 要幾個 warp 才能掃完整條 n 節點路徑」
+```
+
+- 一個 block 處理一隻螞蟻的整條路徑(n 節點)→ 想「1 thread 顧 ~10 節點」就需要 `n/10` 個 thread。
+- thread 打包成 warp,**每 warp 32 thread** → 需要 `(n/10)/32 = n/320` 個 warp。
+- ⚠ 這裡的 **`/32` 是「thread→warp 的硬體單位換算(WARP_SIZE)」,不是「假設 block 固定 32 warp」**。
+  算出來的 `n/320` 本身就是 warps-per-block,不需另外假設 block 多大。
+- 真正寫死 32 的是後面的 `min(32u, ...)`:**一個 block 上限 1024 thread = 32 warp** 是硬體上限。
+  對大實例 `n/320` 早超過 32,故永遠夾到 32 → 等於「直接開最大 block」。
+
+合理性:**方向對但很粗**。節點越多→越多 thread 平行掃 2-opt 候選,直到 block 容量上限,這是對的;
+但「10 節點/thread」只是經驗粒度、無理論最佳值,所以才開 `--ls-block-warps` 讓你手動覆寫。對
+pla85900 這條公式其實退化成「永遠 1024 thread」,真正的調校空間在那個 clamp 上限。
+
+#### V100 的兩種暫存器上限 —— 撞到的是「每 block」那條
+
+per-thread 與 per-block 是**兩個不同層級**的限制,都存在;這個 bug 撞的是 **per-block**:
+
+| 限制 | V100(sm_70) | 意義 |
+| --- | --- | --- |
+| 每 **block** thread 數上限 | **1024** threads/block | 一個 block 最多開幾個 thread(= 32 warp) |
+| 每 **thread** 暫存器上限 | **255** regs/thread | 單一 thread 最多用幾個暫存器(架構硬上限) |
+| 每 **block** 暫存器上限 | **65536** regs/block | 一個 block 內所有 thread 加總(= 整個 SM 的暫存器檔大小) |
+| 每 **SM** 暫存器檔 | 65536 個 32-bit(256 KB) | 一個 SM 的暫存器總量 |
+
+```
+1024 threads/block × (>64 regs/thread)  >  65536  → 超過「每 block」上限 → cudaErrorLaunchOutOfResources
+```
+
+- **不是** per-thread 255 那條被違反 —— 每 thread 可能才 ~80 regs(遠低於 255),問題是 **1024 個
+  thread 加總**超過 block 的 65536 總額。
+- `__launch_bounds__(32 * WARP_SIZE)`(=1024)之所以有效:它告訴編譯器「block 最多 1024 thread」,
+  編譯器便把暫存器壓到 **≤ 65536 / 1024 = 64 regs/thread**,保證「block 總暫存器 ≤ 65536」成立 →
+  1024-thread LS 一定能啟動(代價是必要時 spill 到 local memory)。
+
+#### 釐清「踩到上限」vs「超過上限」—— bug 不是因為 thread 數沒限制
+
+常見誤解:「V100 沒限制 block 能開幾個 thread,才害 1024-thread 撐爆」。**錯。** V100 有 thread
+數上限(1024),程式的 `min(32u, ...)` 正是在尊重它。三條限制各自獨立、檢查時機也不同,要分清
+「踩到(=,合法)」與「超過(>,違法)」:
+
+| 限制 | 規則 | pla85900 的 1024-thread block | 結果 |
+| --- | --- | --- | --- |
+| 每 block thread 數 | ≤ 1024 | 1024 = 1024 | **踩到上限但沒超過 → 合法** |
+| 每 thread 暫存器 | ≤ 255 | ~80 | 沒超過 → 合法 |
+| 每 block 暫存器 | ≤ 65536 | 1024 × (>64) > 65536 | **超過 → 啟動失敗** |
+
+- **thread 數合法是必要、不是充分條件**:1024 正好頂到天花板(等號成立仍合法),所以 thread 數
+  **不是**失敗主因;真正**被超過**的是「每 block 暫存器」這條獨立限制。
+- 但兩條會互相牽制:正因 thread 數**踩滿 1024**(無法再少),暫存器那條的分母被鎖死,只要每 thread
+  暫存器 >64 就必爆。也就是「thread 數頂到 1024」本身合法,卻把暫存器的容錯空間壓到零。
+- 所以正確因果是「**滿足 thread 數上限 ≠ 滿足暫存器上限,兩者是分開的約束**」,而非「缺少 thread 數
+  上限」。`__launch_bounds__` 就是把暫存器那一側壓回 ≤64,讓三條同時成立。
 
 ### 修法(三項,皆在 `two_opt_nn` / LS launch 附近)
 
