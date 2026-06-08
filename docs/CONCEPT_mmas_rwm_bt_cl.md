@@ -415,3 +415,73 @@ update_best     <<<1,   32>>>            單 block（找最小成本）
 **但 100 隻螞蟻提供的平行度「太少」、撐不滿 GPU**，這就是未完成的「方向 2（治本）」：
 **每隻螞蟻多給幾個 warp**，或**一個 block 塞多隻螞蟻**，把在飛 warp 數從 100 拉到足以蓋住延遲。
 砍 FP64 pow（方向 1）只降單顆指令延遲、治標；真正天花板是「平行度不足 + memory latency」。
+
+---
+
+# 十三、2-opt 深入：一次移動、專案的實作、平行在哪
+
+第 12.2 節示範了「翻哪幾格」，這節補上「為什麼翻、程式怎麼做、平行度在哪」。
+對應程式 `two_opt_nn`（`src/mmas.cu:2242`）、`reverse_route_segment`（`:2153`）。
+
+## 13.1 一次 2-opt「移動」的本質
+
+一條 tour 是個環。**2-opt = 拿掉兩條邊、換成另外兩條、把中間那段反轉**：
+
+- 目前有邊 `(a, a_succ)` 與 `(b, b_succ)`。想讓 a 改接到比較近的 b。
+- 換完變成 `(a, b)` 與 `(a_succ, b_succ)`；為了仍是合法環，**a_succ 到 b 之間整段要反轉**。
+- **增益**：
+  ```
+  gain = [ d(a,a_succ) + d(b,b_succ) ]  −  [ d(a,b) + d(a_succ,b_succ) ]
+  ```
+  gain > 0 就是賺（總路程變短），值得做。
+
+### 用 5 城市實算（對上 12.2 的第一次翻轉）
+
+`route=[A,D,C,B,E]`（成本 22），檢查 **a=B**（pos 3，a_succ=E、a_pred=C）：
+- B 候選清單 = [C, A]，試 **b=A**（`d(B,A)=4 < d(B,E)=6` → 後繼方向可能賺），b_succ=D：
+  ```
+  gain = d(B,E)+d(A,D) − d(B,A)−d(E,D) = 6+3−4−4 = 1   ✅
+  ```
+- 反轉區間 `[min(3,0)+1, max(3,0)+1) = [1,4)`：`A[D C B]E → A[B C D]E`，成本 22→21。
+
+> 這就是 12.2 第一次翻轉，只是這裡從**程式真正用的 gain 公式**推出來。
+
+## 13.2 專案如何實作（為 GPU 設計的加速版，非 O(n²) 全掃）
+
+1. **三個 per-ant 陣列**（`blockIdx.x` 偏移）：`route[]`、`pos_in_route[city]`（反查表）、
+   `dont_look_bits[city]`（Bentley 別看位元）。
+2. **最近鄰剪枝**：對 a 只從它的 32 個最近鄰找 b；再加剪枝「新邊要比現有邊短」，
+   只在 `dist_a_to_succ > dist_ab`（或 pred 版）才算（`:2367, :2380`）。
+3. **Don't-look bits**：某節點查過無改善 → bit 設 1，之後跳過（`:2396`）；
+   翻轉後把受影響 **4 個端點** bit 清 0（`:2435-2439`）；全設 1 → 收斂結束。
+4. **前後兩方向都查**：對 a 同時試換後繼邊與前繼邊（兩個 `if`）。
+5. **一輪只套用全 block 最佳一步、再重掃**：不能同時套用多個重疊反轉（會弄壞環），
+   故 `atomicMax` 選全 block gain 最大者 → 只翻它 → 清 bit → 外層 `while` 重掃。
+6. **Packed atomic 防 race**：`gain`（float bits 放高 32）打包 `threadId`（低 32），
+   單一 `atomicMax` 同時定「最大 gain」與「擁有者」（`:2405-2408`）。
+   先前分兩敘述寫，多 warp 會交錯 → 翻錯區段 → pla85900 卡 ~30% 的真兇。
+
+外加 `__launch_bounds__(32*WARP_SIZE)`（`:2241`）限制暫存器，確保大 block（最多 1024 threads）
+能啟動，否則 LS 會靜默不執行。
+
+### 翻轉：`reverse_route_segment` 的補集技巧
+反轉 `[beg,end)` 與反轉「補集」在對稱 TSP 是同一個環（方向相反），
+故 `if (3*len <= 2*dimension)` 挑**較短那半**翻，最多動一半元素；
+用「兩端往中間夾」配對交換並同步維護 `pos_in_route`。
+
+## 13.3 可平行化的地方（四層 + 一個序列點）
+
+| 層級 | 平行內容 | 程式 |
+|------|----------|------|
+| **跨螞蟻（block）** | 100 螞蟻 = 100 block，各自 2-opt 自己的路線，分散到 SM | `<<<100, ls_warps×32>>>` |
+| **block 內跨 warp** | route 依 warp 切塊，多 warp 同時掃不同段找候選 a；各 warp 提最佳、packed atomicMax 選全 block 冠軍 | `:2297` |
+| **warp 內跨 lane** | 對某 a，32 lane 各評估一個候選鄰居 b 並行算 gain，`warp_all_reduce_max` 歸約 | `:2359-2398` |
+| **翻轉 / 算長度** | `reverse_route_segment` 全 block 同時換多對；`par_calculate_route_length` 並行加總 | `:2168, :2465` |
+
+**本質序列點**：
+- **移動的「套用」是序列的**——一輪只翻一步（重疊區段不能同時反轉）。
+  平行度在「每次掃描+翻轉內部」，不是「跨多步移動」。
+- 各相位間的 `__syncthreads()`（找候選 → 選冠軍 → 翻轉 → 清 bit）把 block 內相位序列化。
+
+> `ls_warps_per_block` 預設 = `clamp(ceil(n/320), 1, 32)`（`:3439`）：小實例 1 warp、
+> 大實例最多 32 warp，讓「block 內跨 warp」那層平行度隨問題變大而增加。
