@@ -27,6 +27,29 @@
 
 ---
 
+## 0.5 迭代 pipeline 速查(本檔多處引用的 build / LS kernel 是哪一步)
+
+`run_gpu_based_mmas` 每輪 iteration 依序發 7 支 kernel(每步一支),全檔常提到的
+「build kernel」「LS kernel」分別是第 3、4 步:
+
+| 步驟 | kernel | 暱稱 | 做什麼 | JSON 計時欄位 |
+| --- | --- | --- | --- | --- |
+| 1 | `update_pheromone_heuristic_product_cache` | | 重算 τ^α·η^β 快取(僅非 `_cl`,`_cl` 跳過) | `product-cache-update` |
+| 2 | `update_cand_lists_pheromone_heuristic_product_cache` | | 候選清單版快取更新(`_cl` 用) | `cand-list-product-cache-update` |
+| **3** | `build_ant_solution[_using_cand_lists]` | **Build kernel** | **每個 block 建一隻螞蟻的 tour**(看 cand_list + 費洛蒙挑下一城市) | `solution-build` |
+| **4** | `two_opt_nn` | **LS kernel** | **對剛建好的 tour 做 2-opt 局部搜尋**(配 don't-look bits) | `local-search` |
+| 5 | `update_global_best_and_trail_limits` | | 更新 global best、重算 τ_min/τ_max | `best-solution-update` |
+| 6 | `evaporate_pheromone` | | 費洛蒙蒸發 | `pheromone-evaporate` |
+| 7 | `deposit_pheromone` | | 把費洛蒙灑在 best 螞蟻的路徑上 | `pheromone-deposit` |
+
+- **Build(第 3 步)** 佔 GPU 最大宗 —— 效能優化①/③ 動的是它裡面的 `get_heuristic`;占用率討論
+  (1 warp/block、achieved 1.95%)講的也是它。
+- **LS(第 4 步)** 是接力的下一支獨立 kernel —— 修法⑥ 修的是它在大實例靜默不啟動;它每 block
+  最多 32 warp,與 build 的 1 warp/block 是兩回事。
+- 兩者**前後接力**:第 3 步先把 tour 建出來,第 4 步再拿那條 tour 去 2-opt。
+
+---
+
 ## 修法① — `_cl` 變體移除 `d_product_cache`(省 27.5 GiB)
 
 `_cl`（候選清單）變體用的是 `d_cand_lists_product_cache`(n × cand_list_size,約 11 MB),
@@ -327,6 +350,41 @@ eligible warps 0.12、0.2 wave),但主因從「FP64 compute 延遲」變成兩�
   per-ant 時間 ↓ ~5.5×。
 - ⚠ ncu 的 Duration 是「一次 launch = 全部 ant」,ant 變多 launch 時間變長是正常,要看
   **per-ant throughput**。`target_warps_per_sm = 8`(≈640 ant)即足以吃滿占用率,不需 2× 超額。
+
+### 端到端結果分析(`sbatch run.slurm`,pla85900,1000 iter,LS 開,2026-06-07)
+
+⚠ profile 的 occupancy/per-ant 紅利**不等於端到端加速**。完整跑(修法⑥ LS 已正常)對照
+`--ants=100` vs `--ants=0`(640 隻):
+
+| 指標 | `--ants=100` | `--ants=0`(640) | 變化 |
+| --- | --- | --- | --- |
+| **gap** | 5.745% | 5.782% | 幾乎相同(100 還略好) |
+| **total / mean-iter time** | 1307 s / 1.307 s | 2631 s / 2.631 s | **↑ ~2.01×** |
+| solution-build kernel | 0.921 s | 1.051 s | ↑ 1.14× |
+| **local-search kernel** | 0.281 s | **1.475 s** | **↑ 5.25×** |
+
+→ **品質持平、時間翻倍**,而翻倍幾乎全來自 LS。原因是 build 與 LS 對 ant 數的反應相反:
+
+- **build kernel(+14%)= 優化②的紅利兌現**:ant 100→640 是 6.4× 工作,卻只多 14% →
+  per-ant `6.4/1.14 ≈ 5.6×` 加速,正是 occupancy 1.95%→12.3% 的效果(本來每 block 1 warp、
+  SM 閒置,多塞 ant 幾乎免費吃下)。
+- **LS kernel(×5.25)拿不到這種免費午餐**:2-opt LS「一 block 顧一條完整路徑」,且 pla85900
+  每 block 已開 **32 warp(1024 thread)、本就不缺 warp**(非 occupancy-bound)。多 6.4× 隻螞蟻
+  = 多 6.4× 條路徑要做完整 2-opt,是**實打實的額外計算**,只能被有限 SM 近乎線性消化
+  (6.4× 工作 → 5.25× 時間)。build 省的那點完全補不回來 → 端到端翻倍。
+
+**為什麼品質沒變好**(更多螞蟻 = 同一分布抽更多 i.i.d. 樣本,**沒改變分布的品質天花板**):
+
+- **MMAS 每輪只用「最佳那一隻」螞蟻 deposit 費洛蒙**,不是全部螞蟻。多養螞蟻**不會加速費洛蒙
+  學習**,唯一作用是「每輪挑 iteration-best 時樣本池更大」,而 **best-of-N 對 N 報酬遞減**:
+  100→640 最佳值只邊際變好。
+- 每條路徑都被 **2-opt 打磨到相近的 local optimum**,640 個起點幾乎都掉進同一批盆地 →
+  **best-of-640 ≈ best-of-100**,故 gap 幾乎一字不差(5.745 vs 5.782)。品質由「2-opt 盆地 +
+  費洛蒙動態」決定,**不是樣本數量**;多抽逃不出盆地。
+
+> **結論**:優化② 是 build kernel 的「吞吐/占用率」旋鈕,**不是品質槓桿**(故預設維持 100)。
+> `--ants=0` 只有在「build kernel 是唯一瓶頸、且不開或極輕量 LS」時才划算;一旦 LS 正常運作
+> (修法⑥),它隨 ant 數線性膨脹,`--ants=0` 反而品質持平、時間翻倍。
 
 ---
 
